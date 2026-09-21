@@ -16,14 +16,15 @@ class DatasetPaths:
     Locations of EgoRecall annotations, ScanNet++ source data, and prepared assets.
     Directly supplied relative paths resolve from the current directory.
     Configuration-file paths instead resolve from that file's directory.
+    Each operation checks the roots it requires.
 
     Args:
-        dataset_root: EgoRecall data directory containing manifest.json.
-        scannetpp_root: Optional ScanNet++ directory containing data and metadata.
+        dataset_root: Optional EgoRecall data directory containing manifest.json.
+        scannetpp_root: Optional ScanNet++ root containing the data subtree.
         cache_root: Optional destination directory for prepared assets.
     """
 
-    dataset_root: Path
+    dataset_root: Path | None = None
     scannetpp_root: Path | None = None
     cache_root: Path | None = None
 
@@ -49,7 +50,7 @@ class DatasetPaths:
         Read and validate a TOML paths table. Reject unknown settings and empty paths.
 
         Args:
-            config_path: TOML file with a paths table and required dataset_root.
+            config_path: TOML file with a paths table containing the locations used by the operation.
 
         Returns:
             Absolute locations, with absent optional roots represented by None.
@@ -66,8 +67,6 @@ class DatasetPaths:
         unknown = set(paths) - {"dataset_root", "scannetpp_root", "cache_root"}
         if unknown:
             raise ValueError(f"Unknown path settings: {sorted(unknown)}.")
-        if "dataset_root" not in paths:
-            raise ValueError("[paths] must specify dataset_root.")
 
         # Resolve each configured root relative to the configuration file's directory.
         resolved: dict[str, Path] = {}
@@ -80,7 +79,7 @@ class DatasetPaths:
 
         # Omitted optional roots are represented by None.
         return cls(
-            dataset_root=resolved["dataset_root"],
+            dataset_root=resolved.get("dataset_root"),
             scannetpp_root=resolved.get("scannetpp_root"),
             cache_root=resolved.get("cache_root"),
         )

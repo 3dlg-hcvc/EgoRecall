@@ -1,9 +1,11 @@
 # Copy to paths.toml and set your own locations.
 # Relative paths resolve from this configuration file's directory.
 [paths]
+# Required for annotation-based operations. Omit with --without-annotations.
 dataset_root = "/path/to/EgoRecall_hf"
 
-# Optional locations for ScanNet++ source data and prepared assets.
-# The annotation reader only uses dataset_root.
+# Required for preparation or --source checks; this root contains data/.
 scannetpp_root = "/path/to/scannetpp/v2"
+
+# Required for preparation or access to cached scenes.
 cache_root = "/path/to/egorecall_cache"

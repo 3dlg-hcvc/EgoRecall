@@ -47,6 +47,9 @@ def main() -> None:
             parser.error(
                 "Preparation with annotations requires --split; its sampling stride comes from scene metadata."
             )
+        if paths.dataset_root is None:
+            parser.error("Preparation with annotations requires dataset_root in the configuration.")
+
         annotations = EgoRecallAnnotations(paths.dataset_root, split=args.split, stages=args.stages)
         scene_ids = select_scenes(annotations, args.scenes)
 

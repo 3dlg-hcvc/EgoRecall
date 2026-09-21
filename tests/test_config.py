@@ -59,9 +59,6 @@ dataset_root = "annotations"
     "contents",
     [
         """[paths]
-cache_root = "cache"
-""",
-        """[paths]
 dataset_root = ""
 """,
         "[paths]\ndataset_root = 42",
@@ -76,7 +73,7 @@ dataset_root = "data"
 )
 def test_invalid_configuration_is_rejected(tmp_path: Path, contents: str) -> None:
     """
-    Missing roots, wrong types, and misspelled settings must fail explicitly.
+    Empty paths, wrong types, and misspelled settings must fail explicitly.
 
     Args:
         tmp_path: Temporary configuration directory.
@@ -87,3 +84,22 @@ def test_invalid_configuration_is_rejected(tmp_path: Path, contents: str) -> Non
 
     with pytest.raises(ValueError):
         DatasetPaths.from_toml(config)
+
+
+def test_annotation_root_can_be_omitted(tmp_path: Path) -> None:
+    """
+    Allow source/cache configuration for preparation without an annotation package.
+
+    Args:
+        tmp_path: Temporary configuration directory.
+    """
+    config = tmp_path / "paths.toml"
+    config.write_text("""[paths]
+scannetpp_root = "raw"
+cache_root = "cache"
+""")
+
+    paths = DatasetPaths.from_toml(config)
+    assert paths.dataset_root is None
+    assert paths.scannetpp_root == tmp_path / "raw"
+    assert paths.cache_root == tmp_path / "cache"

@@ -223,7 +223,7 @@ class ScanNetPPScene:
     the complete annotation population; no EgoRecall visibility filter is applied.
 
     Args:
-        root: Dataset root containing data and metadata, not the data subtree itself.
+        root: Dataset root containing data, not the data subtree itself.
         scene_id: Scene to open.
     """
 
@@ -236,8 +236,8 @@ class ScanNetPPScene:
             scene_id: Scene directory name.
         """
         self.root = root.expanduser().resolve()
-        if not (self.root / "data").is_dir() or not (self.root / "metadata").is_dir():
-            raise FileNotFoundError(f"ScanNet++ root must contain data/ and metadata/: {self.root}.")
+        if not (self.root / "data").is_dir():
+            raise FileNotFoundError(f"ScanNet++ root must contain data/: {self.root}.")
 
         self.scene_id = scene_id
         self.paths = ScannetppSceneRelease(scene_id, self.root / "data")

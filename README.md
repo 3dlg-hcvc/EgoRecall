@@ -38,11 +38,15 @@ cache_root = "/path/to/egorecall_cache"
 ```
 
 `dataset_root` identifies the EgoRecall data directory. `scannetpp_root` identifies
-the ScanNet++ root containing `data/` and `metadata/`, and `cache_root` identifies
+the ScanNet++ root containing `data/`, and `cache_root` identifies
 a separate directory for prepared assets. Do not point `scannetpp_root` directly
 at its `data/` subtree.
-The annotation reader uses only `dataset_root`, so the other two settings can be
-omitted. `DatasetPaths` converts the configured roots to absolute paths; those
+
+Configure only the roots used by the operation. Annotation loading/checking
+requires `dataset_root`; scene-cache access additionally requires `cache_root`.
+Preparation requires `scannetpp_root` and `cache_root`, plus `dataset_root` when
+using annotations. `--source` checking requires `scannetpp_root`.
+`DatasetPaths` converts the configured roots to absolute paths; those
 directories need not exist, and their access permissions are not validated.
 Relative paths resolve from the configuration file's directory, independent of
 the calling directory.
@@ -144,7 +148,7 @@ scene needs these iPhone files for observation preparation:
 
 ```text
 scannetpp/v2/
-  metadata/
+  metadata/                       # Optional upstream metadata files
   data/<scene_id>/
     iphone/
       rgb.mkv
@@ -163,6 +167,8 @@ observations and all source object IDs, labels, and boxes. Mesh and segmentation
 files support operations such as visibility rendering; they are not needed to
 read a prepared scene's observations or supervision. DSLR assets and COLMAP
 reconstruction files are not required for preparation.
+The global `metadata/` directory is needed only when requesting a file through
+`ScanNetPPScene.metadata_path()`.
 Adapted toolkit helpers are documented in
 [scannetpp_common/ATTRIBUTION.md](src/scannetpp_common/ATTRIBUTION.md).
 
@@ -215,7 +221,7 @@ egorecall-prepare --config configs/paths.toml --without-annotations \
 
 This samples sorted pose records every tenth entry, giving a nominal 6 FPS
 timeline from the 60 FPS source. With `--without-annotations`, preparation uses
-the configured source/cache roots and does not read `dataset_root`.
+only `scannetpp_root` and `cache_root`; omit `dataset_root` from the configuration.
 Both paths use the same observation-preparation process. When an annotation
 package is supplied, its frame mapping is also checked against the source
 timeline. Sensor timestamps remain available in the cache.
@@ -301,9 +307,11 @@ egorecall-check --config configs/paths.toml \
 ```
 
 `--scenes` limits source/cache work; the complete annotation package is always
-checked. `--source` validates mesh/segmentation availability, camera alignment,
-and object IDs/labels. Together, `--source --cache` additionally compare source
+checked. `--source` validates source camera alignment, object geometry, and
+object IDs/labels. Together, `--source --cache` additionally compare source
 fingerprints, camera values, and all object geometry against the cache.
+These checks use the same source inputs as preparation; they do not require
+meshes, segmentation files, or the global metadata directory.
 `--cache` verifies cached object structure/checksums and joins object IDs and
 labels to the EgoRecall annotations without requiring the raw source. It decodes
 the first and last frames by default; `--decode-all` decodes every frame. Each image read checks

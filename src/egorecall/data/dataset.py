@@ -297,7 +297,7 @@ class EgoRecallDataset:
     a scene context for query-time observations and separate supervision.
 
     Args:
-        paths: Configured dataset locations.
+        paths: Configured locations, including dataset_root for the annotation package.
         split: Benchmark split present in the annotation package.
         stages: Exact stage, inclusive range, or None for all stored queries.
     """
@@ -307,10 +307,13 @@ class EgoRecallDataset:
         Load query metadata; scene caches and geometry are opened separately.
 
         Args:
-            paths: Configured dataset locations.
+            paths: Configured locations, including dataset_root for the annotation package.
             split: Benchmark split.
             stages: Optional query-stage selection.
         """
+        if paths.dataset_root is None:
+            raise ValueError("dataset_root is required to load EgoRecall annotations.")
+
         self.paths = paths
         self.annotations = EgoRecallAnnotations(paths.dataset_root, split=split, stages=stages)
 

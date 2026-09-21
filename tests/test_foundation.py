@@ -3,6 +3,7 @@ Exercise raw-source preparation, cache integrity, and query-time observation bou
 """
 
 import json
+import sys
 import zlib
 from dataclasses import asdict
 from pathlib import Path
@@ -13,6 +14,7 @@ import numpy as np
 import pytest
 
 from egorecall import DatasetPaths
+from egorecall.cli import prepare_scannetpp
 from egorecall.data import EgoRecallAnnotations, EgoRecallDataset
 from egorecall.data.check import check_dataset, verify_package
 from egorecall.data.integrity import fingerprint_file
@@ -87,8 +89,108 @@ def test_raw_scene_paths_fail(raw_root: Path, scene_id: str) -> None:
     """
     with pytest.raises((ValueError, FileNotFoundError)):
         ScanNetPPScene(raw_root, scene_id)
-    with pytest.raises(FileNotFoundError, match="data/ and metadata/"):
+    with pytest.raises(FileNotFoundError, match="must contain data/"):
         ScanNetPPScene(raw_root / "data", "scene_a")
+
+
+def test_annotation_operations_require_dataset_root() -> None:
+    """
+    Report the missing annotation root before attempting package reads.
+    """
+    with pytest.raises(ValueError, match="dataset_root"):
+        EgoRecallDataset(DatasetPaths())
+    with pytest.raises(ValueError, match="dataset_root"):
+        check_dataset(DatasetPaths())
+
+
+def test_preparation_without_annotations_needs_only_cache_inputs(
+    raw_root: Path,
+    tmp_path: Path,
+    ffmpeg_path: str,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """
+    Prepare through the CLI with no annotation root, global metadata, mesh, or segmentation file.
+
+    Args:
+        raw_root: Synthetic source directory containing the cache's actual inputs.
+        tmp_path: Configuration and cache parent.
+        ffmpeg_path: FFmpeg executable.
+        monkeypatch: Fixture supplying CLI arguments.
+        capsys: Captured CLI output and argument errors.
+    """
+    # Remove assets that scene-cache preparation does not consume.
+    metadata = raw_root / "metadata"
+    saved_metadata = raw_root / "saved_metadata"
+    metadata.rename(saved_metadata)
+    for name in ("mesh_aligned_0.05.ply", "segments.json"):
+        (raw_root / "data/scene_a/scans" / name).unlink()
+
+    cache_root = tmp_path / "standalone_cache"
+    config = tmp_path / "paths.toml"
+    config.write_text(
+        f"[paths]\nscannetpp_root = {json.dumps(str(raw_root))}\ncache_root = {json.dumps(str(cache_root))}\n"
+    )
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        [
+            "egorecall-prepare",
+            "--config",
+            str(config),
+            "--without-annotations",
+            "--scenes",
+            "scene_a",
+            "--subsample-factor",
+            "10",
+            "--ffmpeg",
+            ffmpeg_path,
+        ],
+    )
+    prepare_scannetpp.main()
+    with SceneH5(cache_root / "scene_a.h5") as cache:
+        assert cache.frame_names == ("frame_000000", "frame_000010", "frame_000020")
+        assert cache.observation(1).depth[0, 0] == 1010
+        assert set(cache.objects()) == {1, 2, 3}
+
+    # Metadata is required only when a caller requests a particular metadata file.
+    source = ScanNetPPScene(raw_root, "scene_a")
+    with pytest.raises(FileNotFoundError, match=r"Missing ScanNet\+\+ metadata"):
+        source.metadata_path("semantic_classes.txt")
+    saved_metadata.rename(metadata)
+    assert source.metadata_path("semantic_classes.txt") == metadata / "semantic_classes.txt"
+
+    # The annotation-based CLI still requires an annotation root.
+    monkeypatch.setattr(sys, "argv", ["egorecall-prepare", "--config", str(config), "--split", "test"])
+    with pytest.raises(SystemExit) as error:
+        prepare_scannetpp.main()
+    assert error.value.code == 2
+    assert "requires dataset_root" in capsys.readouterr().err
+
+
+def test_source_checks_need_only_cache_inputs(package_root: Path, raw_root: Path, prepared_cache: Path) -> None:
+    """
+    Check source/cache consistency without unrelated assets, while still requiring source annotations.
+
+    Args:
+        package_root: EgoRecall annotation package.
+        raw_root: Source directory to reduce to the files consumed by preparation.
+        prepared_cache: Compatible scene cache.
+    """
+    (raw_root / "metadata").rename(raw_root / "saved_metadata")
+    for name in ("mesh_aligned_0.05.ply", "segments.json"):
+        (raw_root / "data/scene_a/scans" / name).unlink()
+    _add_manifest_hashes(package_root)
+    paths = DatasetPaths(package_root, raw_root, prepared_cache)
+
+    report = check_dataset(paths, scene_ids=["scene_a"], check_source=True, check_cache=True, decode_all=True)
+    assert report.source_scenes == report.cache_scenes == 1
+    assert report.frames_decoded == 3
+
+    (raw_root / "data/scene_a/scans/segments_anno.json").unlink()
+    with pytest.raises(FileNotFoundError, match="segments_anno.json"):
+        check_dataset(paths, scene_ids=["scene_a"], check_source=True, check_cache=True)
 
 
 @pytest.mark.parametrize("codec", ["global", "lz4", "deflate", "mixed"])

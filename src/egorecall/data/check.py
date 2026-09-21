@@ -116,13 +116,15 @@ def check_dataset(
     Args:
         paths: Configured dataset locations.
         scene_ids: Optional source/cache scene subset.
-        check_source: Validate source camera timelines, mesh paths, and object joins.
+        check_source: Validate source camera timelines, object geometry, and annotation joins.
         check_cache: Require and validate a prepared cache for each selected scene.
         decode_all: Decode every cached frame; otherwise check the first and last.
 
     Returns:
         Counts for package, source, cache, and decoded-frame checks.
     """
+    if paths.dataset_root is None:
+        raise ValueError("Dataset checks require dataset_root.")
     if check_source and paths.scannetpp_root is None:
         raise ValueError("Source checks require scannetpp_root.")
     if check_cache and paths.cache_root is None:
@@ -155,9 +157,6 @@ def check_dataset(
         if check_source:
             # Validate source geometry and its object-ID/label join to the annotations.
             source = ScanNetPPScene(paths.scannetpp_root, scene_id)
-            for path in (source.paths.scan_mesh_path, source.paths.scan_mesh_segs_path):
-                if not path.is_file():
-                    raise FileNotFoundError(f"Missing ScanNet++ geometry: {path}.")
             source_objects = source.objects()
             join_supervision(scene_id, source_objects, scene_annotations)
 
