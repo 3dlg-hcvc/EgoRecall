@@ -62,6 +62,7 @@ class DatasetPaths:
         if set(config) != {"paths"} or not isinstance(config["paths"], dict):
             raise ValueError("Configuration must contain a single [paths] table.")
         paths = config["paths"]
+
         unknown = set(paths) - {"dataset_root", "scannetpp_root", "cache_root"}
         if unknown:
             raise ValueError(f"Unknown path settings: {sorted(unknown)}.")
@@ -73,6 +74,7 @@ class DatasetPaths:
         for name, value in paths.items():
             if not isinstance(value, str) or not value.strip():
                 raise ValueError(f"{name} must be a nonempty path string.")
+
             path = Path(value).expanduser()
             resolved[name] = path if path.is_absolute() else config_path.parent / path
 

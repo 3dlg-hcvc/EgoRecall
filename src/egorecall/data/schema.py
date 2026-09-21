@@ -23,6 +23,7 @@ QUERY_SCHEMA = pa.schema(
         ("hidden_target_oids", OBJECT_IDS),
     ]
 )
+
 STAGE_SCHEMA = pa.schema(
     [
         ("scene_id", pa.string()),
@@ -31,6 +32,7 @@ STAGE_SCHEMA = pa.schema(
         ("stage", pa.int32()),
     ]
 )
+
 FRAME_SCHEMA = pa.schema(
     [
         ("scene_id", pa.string()),

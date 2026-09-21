@@ -1,0 +1,438 @@
+"""
+Exercise raw-source preparation, cache integrity, and query-time observation boundaries.
+"""
+
+import json
+import zlib
+from dataclasses import asdict
+from pathlib import Path
+
+import h5py
+import lz4.block
+import numpy as np
+import pytest
+
+from egorecall import DatasetPaths
+from egorecall.data import EgoRecallAnnotations, EgoRecallDataset
+from egorecall.data.check import check_dataset, verify_package
+from egorecall.data.integrity import fingerprint_file
+from egorecall.data.media import decode_image, extract_video_frames
+from egorecall.data.prepare import prepare_scene
+from egorecall.data.scannetpp import ScanNetPPScene, scale_intrinsics
+from egorecall.data.scene_h5 import SceneH5
+from scannetpp_common.iphone import iter_depth_frames
+
+
+@pytest.fixture
+def prepared_cache(raw_root: Path, package_root: Path, tmp_path: Path, ffmpeg_path: str) -> Path:
+    """
+    Prepare the synthetic scene using the package's actual frame mapping.
+
+    Args:
+        raw_root: Synthetic original-layout source scene.
+        package_root: Matching three-frame annotation package.
+        tmp_path: Isolated writable cache parent.
+        ffmpeg_path: FFmpeg executable.
+
+    Returns:
+        Cache directory containing scene_a.h5.
+    """
+    annotations = EgoRecallAnnotations(package_root)
+    root = tmp_path / "cache"
+    prepare_scene(
+        ScanNetPPScene(raw_root, "scene_a"),
+        root,
+        expected_frame_names=annotations.frame_names("scene_a"),
+        ffmpeg=ffmpeg_path,
+    )
+    return root
+
+
+def test_raw_geometry_and_camera_conventions(raw_root: Path) -> None:
+    """
+    Preserve source object membership, matrix orientation, timestamps, and intrinsic scaling.
+
+    Args:
+        raw_root: Scene with known source boxes and cameras.
+    """
+    source = ScanNetPPScene(raw_root, "scene_a")
+    cameras = source.cameras()
+    assert cameras.frame_names == ("frame_000000", "frame_000010", "frame_000020")
+    np.testing.assert_array_equal(cameras.camera_to_world[:, 0, 3], [0, 0.1, 0.2])
+    np.testing.assert_allclose(cameras.timestamps, 100 + np.array([0, 10, 20]) / 60)
+
+    original = cameras.intrinsics.copy()
+    scaled = scale_intrinsics(cameras.intrinsics, (32, 24), (256, 192))
+    np.testing.assert_array_equal(scaled[0], [[160, 0, 128], [0, 160, 96], [0, 0, 1]])
+    np.testing.assert_array_equal(cameras.intrinsics, original)
+
+    objects = source.objects()
+    assert set(objects) == {1, 2, 3}
+    np.testing.assert_array_equal(objects[2].lengths, [1, 2, 3])
+    assert objects[3].label == "lamp"
+
+    assert source.metadata_path("semantic_classes.txt").is_file()
+    assert source.paths.scan_mesh_path.is_file()
+    assert source.paths.scan_mesh_segs_path.is_file()
+
+
+@pytest.mark.parametrize("scene_id", ["../scene_a", "/scene_a", "missing"])
+def test_raw_scene_paths_fail(raw_root: Path, scene_id: str) -> None:
+    """
+    Reject path traversal and missing source scenes.
+
+    Args:
+        raw_root: Original-layout source root.
+        scene_id: Invalid or unavailable scene identifier.
+    """
+    with pytest.raises((ValueError, FileNotFoundError)):
+        ScanNetPPScene(raw_root, scene_id)
+    with pytest.raises(FileNotFoundError, match="data/ and metadata/"):
+        ScanNetPPScene(raw_root / "data", "scene_a")
+
+
+@pytest.mark.parametrize("codec", ["global", "lz4", "deflate", "mixed"])
+def test_depth_formats_and_units(tmp_path: Path, codec: str) -> None:
+    """
+    Decode supported depth formats and retain exact integer values at boundaries.
+
+    Args:
+        tmp_path: Directory for encoded depth streams.
+        codec: Upstream whole-stream or per-frame compression format.
+    """
+    frames = np.zeros((3, 192, 256), dtype=np.uint16)
+    for index in range(3):
+        frames[index, :, :128] = 1000 + index * 1000
+        frames[index, :, 128:] = 5000 + index * 1000
+
+    # Encode the same depth values using each supported source representation.
+    floats = frames.astype("<f4") / 1000
+    if codec == "global":
+        encoded = zlib.compress(floats.tobytes(), wbits=-zlib.MAX_WBITS)
+    else:
+        blocks = []
+        for index in range(3):
+            if codec == "lz4" or (codec == "mixed" and index % 2 == 0):
+                block = lz4.block.compress(frames[index].tobytes(), store_size=False)
+            else:
+                block = zlib.compress(floats[index].tobytes(), wbits=-zlib.MAX_WBITS)
+            blocks.append(len(block).to_bytes(4, "little") + block)
+        encoded = b"".join(blocks)
+
+    path = tmp_path / "depth.bin"
+    path.write_bytes(encoded)
+
+    # Check the complete sequence and a selection that preserves source indices.
+    decoded = list(iter_depth_frames(path))
+    assert [index for index, _ in decoded] == [0, 1, 2]
+    for index, depth in decoded:
+        np.testing.assert_array_equal(depth, frames[index])
+
+    selected = list(iter_depth_frames(path, selected={1, 2}))
+    assert [index for index, _ in selected] == [1, 2]
+
+    # Truncation must fail rather than returning a partial sequence as a successful decode.
+    path.write_bytes(encoded[:-5])
+    with pytest.raises(ValueError):
+        list(iter_depth_frames(path))
+
+
+def test_prepared_pixels_camera_and_reuse(raw_root: Path, prepared_cache: Path, ffmpeg_path: str) -> None:
+    """
+    Verify source frame alignment, RGB orientation/channels, depth boundaries, and cache reuse.
+
+    Args:
+        raw_root: Scene with known source pixel values.
+        prepared_cache: Cache prepared from that scene.
+        ffmpeg_path: FFmpeg executable for the preparation interface.
+    """
+    path = prepared_cache / "scene_a.h5"
+    with SceneH5(path) as cache:
+        frame = cache.observation(1)
+        assert frame.frame_name == "frame_000010"
+
+        assert frame.depth.dtype == np.uint16
+        np.testing.assert_array_equal(frame.depth[:, :128], np.full((192, 128), 1010, dtype=np.uint16))
+        np.testing.assert_array_equal(frame.depth[:, 128:], np.full((192, 128), 5010, dtype=np.uint16))
+
+        np.testing.assert_allclose(frame.rgb[2, 2], [200, 30, 30], atol=5)
+        np.testing.assert_allclose(frame.rgb[-3, -3], [30, 30, 200], atol=5)
+        assert np.all(frame.mask[:, :16] == 255) and np.all(frame.mask[:, 16:] == 0)
+
+        assert frame.camera_to_world[0, 3] == 0.1
+        assert frame.depth_intrinsics[0, 0] == 160
+
+        frame.camera_to_world[0, 3] = 999
+        assert cache.observation(1).camera_to_world[0, 3] == 0.1
+
+    before = (path.stat().st_mtime_ns, fingerprint_file(path))
+    assert prepare_scene(ScanNetPPScene(raw_root, "scene_a"), prepared_cache, ffmpeg=ffmpeg_path) == path
+    assert (path.stat().st_mtime_ns, fingerprint_file(path)) == before
+
+
+def test_query_cutoff_and_separate_supervision(package_root: Path, raw_root: Path, prepared_cache: Path) -> None:
+    """
+    Expose only legal query history and keep full scene ground truth behind separate accessors.
+
+    Args:
+        package_root: Synthetic staged queries.
+        raw_root: Source scene with three objects.
+        prepared_cache: Full three-frame observation cache.
+    """
+    dataset = EgoRecallDataset(DatasetPaths(package_root, raw_root, prepared_cache))
+    with dataset.open_scene("scene_a") as scene:
+        sample = scene.query(17)
+        assert set(asdict(sample.query)) == {"scene_id", "query_idx", "description", "frame"}
+        assert sample.query.frame == 1
+
+        assert sample.observations.frame_names == ("frame_000000", "frame_000010")
+        assert [frame.frame_idx for frame in sample.observations] == [0, 1]
+        assert sample.observations.frame(1).frame_name == "frame_000010"
+
+        for invalid in (-1, True, 1.0, 2, 100):
+            with pytest.raises((ValueError, IndexError)):
+                sample.observations.frame(invalid)
+            with pytest.raises((ValueError, IndexError)):
+                sample.observations.encoded_image(invalid)
+
+        assert scene.answer(17)["target_oids"] == [1]
+        assert set(scene.supervision.source_objects) == {1, 2, 3}
+        assert set(scene.supervision.filtered_objects) == {1, 2}
+        assert scene.supervision.annotations["num_frames"] == 3
+
+    with pytest.raises((ValueError, KeyError)):
+        sample.observations.frame(0)
+
+
+def test_stale_source_and_wrong_timeline_fail(raw_root: Path, prepared_cache: Path, ffmpeg_path: str) -> None:
+    """
+    Reject incompatible cache reuse without changing the existing completed file.
+
+    Args:
+        raw_root: Source scene to change after preparation.
+        prepared_cache: Completed cache to preserve.
+        ffmpeg_path: FFmpeg executable.
+    """
+    source = ScanNetPPScene(raw_root, "scene_a")
+    before = fingerprint_file(prepared_cache / "scene_a.h5")
+    with pytest.raises(ValueError, match="timeline"):
+        prepare_scene(source, prepared_cache, subsample_factor=5, ffmpeg=ffmpeg_path)
+    with pytest.raises(ValueError, match="frame mapping"):
+        prepare_scene(source, prepared_cache, expected_frame_names=("frame_000000",), ffmpeg=ffmpeg_path)
+
+    exif = source.paths.iphone_exif_path
+    exif.write_text(exif.read_text() + "\n")
+    with pytest.raises(ValueError, match="source files changed"):
+        prepare_scene(source, prepared_cache, ffmpeg=ffmpeg_path)
+    assert fingerprint_file(prepared_cache / "scene_a.h5") == before
+
+
+def test_failed_preparation_leaves_no_completed_cache(raw_root: Path, tmp_path: Path, ffmpeg_path: str) -> None:
+    """
+    A missing depth frame aborts preparation and removes temporary outputs.
+
+    Args:
+        raw_root: Source scene whose depth timeline will be truncated cleanly.
+        tmp_path: Cache parent.
+        ffmpeg_path: FFmpeg executable.
+    """
+    source = ScanNetPPScene(raw_root, "scene_a")
+    depth = source.paths.iphone_depth_path.read_bytes()
+    first_size = int.from_bytes(depth[:4], "little")
+    source.paths.iphone_depth_path.write_bytes(depth[: 4 + first_size])
+
+    root = tmp_path / "failed_cache"
+    with pytest.raises(ValueError, match="depth is missing"):
+        prepare_scene(source, root, ffmpeg=ffmpeg_path)
+    assert not list(root.iterdir())
+
+    with pytest.raises(ValueError, match="outside the ScanNet"):
+        prepare_scene(source, raw_root / "cache", ffmpeg=ffmpeg_path)
+
+
+def test_corrupt_cached_payload_fails(prepared_cache: Path) -> None:
+    """
+    Detect changed encoded pixels before returning an observation.
+
+    Args:
+        prepared_cache: Completed cache whose second RGB payload will be replaced.
+    """
+    path = prepared_cache / "scene_a.h5"
+    with h5py.File(path, "r+") as cache:
+        cache["frames/rgb_jpg"][1] = cache["frames/rgb_jpg"][0]
+
+    with SceneH5(path) as cache, pytest.raises(ValueError, match="checksum mismatch"):
+        cache.observation(1)
+
+
+@pytest.mark.parametrize(
+    ("attribute", "value"),
+    [
+        ("schema_version", 1.0),
+        ("subsample_factor", 10.5),
+        ("rgb_resolution", [32.5, 24.0]),
+        ("scene_id", "../scene_a"),
+        ("source_fps", "60"),
+    ],
+)
+def test_invalid_cache_metadata_fails(prepared_cache: Path, attribute: str, value: object) -> None:
+    """
+    Reject malformed metadata instead of coercing it into apparently valid values.
+
+    Args:
+        prepared_cache: Cache whose metadata will be changed.
+        attribute: Required attribute to corrupt.
+        value: Invalid replacement value.
+    """
+    path = prepared_cache / "scene_a.h5"
+    with h5py.File(path, "r+") as cache:
+        cache.attrs[attribute] = value
+
+    with pytest.raises(ValueError):
+        SceneH5(path)
+
+
+@pytest.mark.parametrize("indices", [(7,), (1, 4, 20)])
+def test_video_selection_uses_source_indices(
+    raw_root: Path, tmp_path: Path, ffmpeg_path: str, indices: tuple[int, ...]
+) -> None:
+    """
+    Select a nonzero singleton or irregular indices without shifting frame identities.
+
+    Args:
+        raw_root: Synthetic video whose green channel encodes source time.
+        tmp_path: Extraction directory parent.
+        ffmpeg_path: FFmpeg executable.
+        indices: Exact source indices to extract.
+    """
+    video = raw_root / "data/scene_a/iphone/rgb.mkv"
+    names = tuple(f"frame_{index:06d}" for index in indices)
+    files = extract_video_frames(video, names, tmp_path / "selected", ffmpeg=ffmpeg_path)
+    for index, path in zip(indices, files, strict=True):
+        rgb = decode_image(path.read_bytes(), "rgb", (32, 24))
+        np.testing.assert_allclose(rgb[2, 2], [200, 20 + index, 30], atol=5)
+
+    with pytest.raises(ValueError, match="extracted 1 frames, expected 2"):
+        extract_video_frames(video, ("frame_000000", "frame_000100"), tmp_path / "missing", ffmpeg=ffmpeg_path)
+
+
+@pytest.mark.parametrize("change", ["missing", "label"])
+def test_source_object_join_fails(package_root: Path, raw_root: Path, prepared_cache: Path, change: str) -> None:
+    """
+    Reject incomplete or inconsistent source-object joins before exposing supervision.
+
+    Args:
+        package_root: Two-object visibility annotation.
+        raw_root: Source objects to corrupt.
+        prepared_cache: Compatible observation cache.
+        change: Remove a required object or change its label.
+    """
+    path = raw_root / "data/scene_a/scans/segments_anno.json"
+    source = json.loads(path.read_text())
+    if change == "missing":
+        source["segGroups"] = source["segGroups"][1:]
+    else:
+        source["segGroups"][0]["label"] = "desk"
+    path.write_text(json.dumps(source))
+
+    dataset = EgoRecallDataset(DatasetPaths(package_root, raw_root, prepared_cache))
+    with dataset.open_scene("scene_a") as scene, pytest.raises((KeyError, ValueError)):
+        scene.supervision
+
+
+def test_observations_without_raw_source(package_root: Path, prepared_cache: Path) -> None:
+    """
+    Use prepared observations without reopening raw assets; geometry still requires its source.
+
+    Args:
+        package_root: Query annotations.
+        prepared_cache: Existing observation cache.
+    """
+    dataset = EgoRecallDataset(DatasetPaths(package_root, cache_root=prepared_cache), stages=1)
+    scene_id, query_idx = dataset.annotations.query_keys[0]
+    with dataset.open_scene(scene_id) as scene:
+        sample = scene.query(query_idx)
+        assert len(sample.observations) == 1
+        assert sample.observations.frame(0).depth[0, 0] == 1000
+        with pytest.raises(AttributeError):
+            sample.observations.frame_names = ("frame_000000", "frame_000010")
+        with pytest.raises(ValueError, match="scannetpp_root"):
+            scene.supervision
+        with pytest.raises(KeyError):
+            scene.query(17)
+    with pytest.raises(KeyError):
+        dataset.open_scene("scene_b")
+
+
+def _add_manifest_hashes(root: Path) -> None:
+    """
+    Fingerprint synthetic package files for checksum-checker tests.
+
+    Args:
+        root: Synthetic annotation package.
+    """
+    path = root / "manifest.json"
+    manifest = json.loads(path.read_text())
+    manifest["files"] = {
+        str(file.relative_to(root)): fingerprint_file(file)
+        for file in root.rglob("*")
+        if file.is_file() and file != path
+    }
+    path.write_text(json.dumps(manifest))
+
+
+def test_checker_source_cache_and_package(package_root: Path, raw_root: Path, prepared_cache: Path) -> None:
+    """
+    Validate a complete package while limiting source/cache work to one available scene.
+
+    Args:
+        package_root: Two-scene annotation package.
+        raw_root: Source download containing scene_a only.
+        prepared_cache: Observation cache for scene_a.
+    """
+    _add_manifest_hashes(package_root)
+    report = check_dataset(
+        DatasetPaths(package_root, raw_root, prepared_cache),
+        scene_ids=["scene_a"],
+        check_source=True,
+        check_cache=True,
+        decode_all=True,
+    )
+    assert report.queries_checked == 4
+    assert report.annotation_scenes == 2
+    assert report.source_scenes == report.cache_scenes == 1
+    assert report.frames_decoded == 3
+
+    # Unlisted required payloads cannot bypass integrity verification.
+    path = package_root / "manifest.json"
+    manifest = json.loads(path.read_text())
+    del manifest["files"]["queries/test.parquet"]
+    path.write_text(json.dumps(manifest))
+    with pytest.raises(ValueError, match="omits required files"):
+        verify_package(package_root)
+
+    # A listed payload must still match its recorded checksum after all required files are restored.
+    _add_manifest_hashes(package_root)
+    with (package_root / "scenes.json").open("a") as stream:
+        stream.write("\n")
+    with pytest.raises(ValueError, match="SHA-256"):
+        verify_package(package_root)
+
+
+@pytest.mark.parametrize("name", ["objects", "any_target_queries"])
+def test_checker_annotation_counts_fail(package_root: Path, name: str) -> None:
+    """
+    Compare manifest supervision totals with actual annotations and query values.
+
+    Args:
+        package_root: Synthetic annotation package.
+        name: Manifest total to corrupt.
+    """
+    _add_manifest_hashes(package_root)
+    path = package_root / "manifest.json"
+    manifest = json.loads(path.read_text())
+    manifest["counts"][name] += 1
+    path.write_text(json.dumps(manifest))
+
+    with pytest.raises(ValueError, match=f"manifest/counts/{name}"):
+        check_dataset(DatasetPaths(package_root))

@@ -222,3 +222,6 @@ __marimo__/
 .claude
 *.tar.gz
 configs/paths.toml
+
+# Locally prepared observation caches
+*.h5

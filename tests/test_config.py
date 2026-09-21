@@ -28,6 +28,7 @@ scannetpp_root = "../raw/v2"
 cache_root = "../prepared"
 """
     )
+
     monkeypatch.chdir(tmp_path.parent)
     paths = DatasetPaths.from_toml(config)
     assert paths.dataset_root == tmp_path / "annotations"
@@ -48,6 +49,7 @@ def test_optional_roots_can_be_omitted(tmp_path: Path) -> None:
     config.write_text("""[paths]
 dataset_root = "annotations"
 """)
+
     paths = DatasetPaths.from_toml(config)
     assert paths.dataset_root == tmp_path / "annotations"
     assert paths.scannetpp_root is None and paths.cache_root is None
@@ -82,5 +84,6 @@ def test_invalid_configuration_is_rejected(tmp_path: Path, contents: str) -> Non
     """
     config = tmp_path / "paths.toml"
     config.write_text(contents)
+
     with pytest.raises(ValueError):
         DatasetPaths.from_toml(config)

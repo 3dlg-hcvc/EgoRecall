@@ -84,6 +84,7 @@ def validate_scene(value: object) -> SceneRecord:
     """
     record = require_fields(value, SceneRecord.__required_keys__, "Scene metadata")
     scene_id = require_text(record["scene_id"], "scene_id")
+
     split = record["split"]
     if split not in ("train", "val", "test"):
         raise ValueError(f"{scene_id}: unknown split {split!r}.")
@@ -93,8 +94,10 @@ def validate_scene(value: object) -> SceneRecord:
         require_integer(record[field], f"{scene_id}/{field}", minimum=1)
     for field in ("num_queries", "num_objects"):
         require_integer(record[field], f"{scene_id}/{field}")
+
     for field in ("source_fps", "nominal_timeline_fps"):
         require_number(record[field], f"{scene_id}/{field}")
+
     require_text(record["annotations"], f"{scene_id}/annotations")
     return cast(SceneRecord, record)
 
@@ -116,9 +119,11 @@ def validate_annotations(value: object, scene: SceneRecord) -> SceneAnnotations:
     record = require_fields(value, SceneAnnotations.__required_keys__, f"{scene_id}/annotations")
     if type(record["schema_version"]) is not int or record["schema_version"] != 1:
         raise ValueError(f"{scene_id}: unsupported annotation schema_version.")
+
     n_frames = require_integer(record["num_frames"], f"{scene_id}/num_frames", minimum=1)
     if record["scene_id"] != scene_id or n_frames != scene["num_frames"]:
         raise ValueError(f"{scene_id}: annotation scene or timeline does not match scenes.json.")
+
     require_text(record["visibility_filter"], f"{scene_id}/visibility_filter")
     require_integer(record["image_pixels"], f"{scene_id}/image_pixels", minimum=1)
 
@@ -145,11 +150,14 @@ def _validate_object(value: object, n_frames: int, context: str) -> None:
     """
     obj = require_fields(value, ObjectAnnotation.__required_keys__, context)
     require_text(obj["label"], f"{context}/label")
+
+    # Check timeline bounds and aggregate visibility statistics.
     temporal = require_fields(obj["temporal"], TemporalSummary.__required_keys__, f"{context}/temporal")
     for field in ("first_seen_frame", "last_seen_frame", "peak_visibility_frame"):
         frame = require_integer(temporal[field], f"{context}/{field}")
         if frame >= n_frames:
             raise ValueError(f"{context}/{field}: frame outside the canonical timeline.")
+
     count = require_integer(temporal["total_visible_frames"], f"{context}/total_visible_frames", minimum=1)
     if count > n_frames:
         raise ValueError(f"{context}: total_visible_frames exceeds the scene length.")
@@ -176,6 +184,7 @@ def _validate_object(value: object, n_frames: int, context: str) -> None:
         frame_idx = int(frame_key)
         if str(frame_idx) != frame_key or frame_idx >= n_frames:
             raise ValueError(f"{context}: observation frame outside the canonical timeline.")
+
         values = require_fields(statistics, FrameVisibility.__required_keys__, f"{context}/{frame_key}")
         for name, fraction in values.items():
             require_number(fraction, f"{context}/{frame_key}/{name}")

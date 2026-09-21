@@ -1,516 +1,330 @@
 """
-Read EgoRecall query tables into Arrow and load scene annotation files on demand.
+Join benchmark queries, bounded observation histories, and separate scene supervision.
 """
 
-import gzip
-import json
-from collections import Counter, defaultdict
+from __future__ import annotations
+
 from collections.abc import Iterator
-from pathlib import Path
-from typing import cast
+from dataclasses import dataclass
+from functools import cached_property
+from types import TracebackType
 
-import pyarrow as pa
-import pyarrow.parquet as pq
+from egorecall.config import DatasetPaths
+from egorecall.data.annotations import EgoRecallAnnotations
+from egorecall.data.records import QueryRecord, SceneAnnotations
+from egorecall.data.scannetpp import ObjectGeometry, ScanNetPPScene
+from egorecall.data.scene_h5 import Observation, SceneH5
+from egorecall.data.validation import require_integer
 
-from egorecall.data.records import QueryKey, QueryRecord, SceneAnnotations, SceneRecord, Split, decode_program
-from egorecall.data.schema import FRAME_SCHEMA, QUERY_SCHEMA, STAGE_SCHEMA
-from egorecall.data.stages import StageRange, parse_stages
-from egorecall.data.validation import require_integer, require_text, validate_annotations, validate_scene
+
+@dataclass(frozen=True)
+class QueryInput:
+    """
+    Query fields available to a method at query time.
+
+    Args:
+        scene_id: Scene containing the observation history.
+        query_idx: Stable per-scene query identifier.
+        description: Natural-language object reference.
+        frame: Inclusive canonical observation cutoff.
+    """
+
+    scene_id: str
+    query_idx: int
+    description: str
+    frame: int
+
+
+class ObservationWindow:
+    """
+    Access frames through an inclusive query-time cutoff. The owning EgoRecallScene
+    context must remain open while this window is used.
+
+    Args:
+        cache: Open observation cache.
+        through_frame: Last canonical frame available to the method.
+    """
+
+    def __init__(self, cache: SceneH5, through_frame: int) -> None:
+        """
+        Bound the accessible timeline without reading image payloads.
+
+        Args:
+            cache: Open observation cache.
+            through_frame: Inclusive canonical cutoff.
+        """
+        require_integer(through_frame, "through_frame")
+        if through_frame >= len(cache.frame_names):
+            raise IndexError("Query cutoff is outside the observation timeline.")
+
+        self._cache = cache
+        self._frame_names = cache.frame_names[: through_frame + 1]
+
+    @property
+    def frame_names(self) -> tuple[str, ...]:
+        """
+        List source names through the query cutoff.
+
+        Returns:
+            Immutable names ordered by canonical index.
+        """
+        return self._frame_names
+
+    def __len__(self) -> int:
+        """
+        Count frames available at query time.
+
+        Returns:
+            Number of frames through the inclusive cutoff.
+        """
+        return len(self.frame_names)
+
+    def frame(self, frame_idx: int) -> Observation:
+        """
+        Decode an available observation, rejecting access beyond the query cutoff.
+
+        Args:
+            frame_idx: Zero-based canonical index within this history.
+
+        Returns:
+            One observation with no target labels, programs, or visibility history.
+        """
+        self._require_frame(frame_idx)
+        return self._cache.observation(frame_idx)
+
+    def encoded_image(self, frame_idx: int, kind: str = "rgb") -> bytes:
+        """
+        Read an encoded image within the same query-time boundary.
+
+        Args:
+            frame_idx: Zero-based canonical index within this history.
+            kind: One of rgb, depth, or mask.
+
+        Returns:
+            JPEG or PNG bytes for the requested observation.
+        """
+        self._require_frame(frame_idx)
+        return self._cache.encoded_image(frame_idx, kind)
+
+    def _require_frame(self, frame_idx: int) -> None:
+        """
+        Reject invalid indices and future observations without clamping them.
+
+        Args:
+            frame_idx: Requested canonical index.
+        """
+        require_integer(frame_idx, "frame_idx")
+        if frame_idx >= len(self.frame_names):
+            raise IndexError(f"Frame {frame_idx} exceeds the query cutoff {len(self.frame_names) - 1}.")
+
+    def __iter__(self) -> Iterator[Observation]:
+        """
+        Decode the available history in order, retaining one observation at a time.
+
+        Returns:
+            Iterator from frame zero through the query frame.
+        """
+        for frame_idx in range(len(self.frame_names)):
+            yield self._cache.observation(frame_idx)
+
+
+@dataclass(frozen=True)
+class QuerySample:
+    """
+    Method-facing query and its bounded observation history.
+
+    Args:
+        query: Query identity, text, and time only.
+        observations: History through the query frame, inclusive.
+    """
+
+    query: QueryInput
+    observations: ObservationWindow
+
+
+@dataclass(frozen=True)
+class SceneSupervision:
+    """
+    Full-scene ground truth for generation, inspection, or evaluation.
+
+    Args:
+        annotations: Filtered object visibility over the complete timeline.
+        source_objects: Every object in the source ScanNet++ annotation.
+        filtered_objects: Source geometry for the objects retained by EgoRecall.
+    """
+
+    annotations: SceneAnnotations
+    source_objects: dict[int, ObjectGeometry]
+    filtered_objects: dict[int, ObjectGeometry]
+
+
+def join_supervision(source: ScanNetPPScene, annotations: SceneAnnotations) -> SceneSupervision:
+    """
+    Join filtered visibility annotations to the complete source-object population.
+    Require matching object IDs and labels; missing objects are data errors.
+
+    Args:
+        source: Scene supplying geometry.
+        annotations: Full-scene EgoRecall visibility annotations.
+
+    Returns:
+        Separate source and filtered object mappings with shared geometry records.
+    """
+    if annotations["scene_id"] != source.scene_id:
+        raise ValueError("Source scene and annotation scene do not match.")
+
+    objects = source.objects()
+    filtered: dict[int, ObjectGeometry] = {}
+    for key, annotation in annotations["objects"].items():
+        oid = int(key)
+        obj = objects[oid]
+        if obj.label != annotation["label"]:
+            raise ValueError(f"{source.scene_id}/{oid}: source and annotation labels differ.")
+        filtered[oid] = obj
+
+    return SceneSupervision(annotations, objects, filtered)
+
+
+class EgoRecallScene:
+    """
+    Own one scene's observation cache and load supervision only when requested.
+    Pass query() results to methods; answer() and supervision contain ground truth.
+
+    Args:
+        paths: Dataset, raw ScanNet++, and local cache locations.
+        annotations: Query selection containing this scene.
+        scene_id: Scene represented by at least one selected query.
+    """
+
+    def __init__(self, paths: DatasetPaths, annotations: EgoRecallAnnotations, scene_id: str) -> None:
+        """
+        Open and validate a prepared scene against the annotation frame mapping.
+
+        Args:
+            paths: Dataset and cache locations, with a raw root for supervision.
+            annotations: Query selection containing this scene.
+            scene_id: Selected scene.
+        """
+        metadata = annotations.get_scene(scene_id)
+        if paths.cache_root is None:
+            raise ValueError("cache_root is required to read observations.")
+
+        self.scene_id = scene_id
+        self._annotations = annotations
+        self._paths = paths
+
+        # Keep the handle only if the cache matches this scene's annotation timeline.
+        self._cache = SceneH5(paths.cache_root / f"{scene_id}.h5")
+        try:
+            self._cache.validate_compatibility(
+                scene_id, annotations.frame_names(scene_id), metadata["subsample_factor"], metadata["source_fps"]
+            )
+        except BaseException:
+            self._cache.close()
+            raise
+
+    def query(self, query_idx: int) -> QuerySample:
+        """
+        Select the query inputs and legal history without exposing supervision.
+
+        Args:
+            query_idx: Stable identifier within this scene and dataset selection.
+
+        Returns:
+            Text/time/identity and observations through the query frame.
+        """
+        record = self._annotations.get_query(self.scene_id, query_idx)
+        query = QueryInput(self.scene_id, query_idx, record["description"], record["frame"])
+        return QuerySample(query, ObservationWindow(self._cache, query.frame))
+
+    def answer(self, query_idx: int) -> QueryRecord:
+        """
+        Read a query's full record for supervision, including targets and DSL program.
+
+        Args:
+            query_idx: Stable identifier within this scene and dataset selection.
+
+        Returns:
+            A fresh query dictionary containing its ground-truth answer.
+        """
+        return self._annotations.get_query(self.scene_id, query_idx)
+
+    @cached_property
+    def supervision(self) -> SceneSupervision:
+        """
+        Load full-scene visibility and source geometry once for this scene context.
+        The retained record includes future visibility and must not be passed to methods.
+
+        Returns:
+            Scene annotations and explicit source/filtered object populations.
+        """
+        if self._paths.scannetpp_root is None:
+            raise ValueError("scannetpp_root is required to load source object geometry.")
+
+        source = ScanNetPPScene(self._paths.scannetpp_root, self.scene_id)
+        return join_supervision(source, self._annotations.get_annotations(self.scene_id))
+
+    def close(self) -> None:
+        """
+        Close the observation cache and invalidate further image access through its windows.
+        """
+        self._cache.close()
+
+    def __enter__(self) -> EgoRecallScene:
+        """
+        Enter this scene context.
+
+        Returns:
+            This open scene accessor.
+        """
+        return self
+
+    def __exit__(
+        self, exc_type: type[BaseException] | None, exc: BaseException | None, traceback: TracebackType | None
+    ) -> None:
+        """
+        Close the observation cache on normal exit or failure.
+
+        Args:
+            exc_type: Active exception type, if any.
+            exc: Active exception, if any.
+            traceback: Active exception traceback, if any.
+        """
+        self.close()
 
 
 class EgoRecallDataset:
     """
-    Read a split and optional stage selection from an EgoRecall data directory.
-    Stable query keys are independent of table positions. Queries are loaded
-    into Arrow before stage selection; scene annotation files are read on demand.
-    Validation checks table schemas, scene/frame joins, stage membership, and
-    selected query fields.
-
-    The supported layout has a single-split manifest and one Parquet file per
-    table. Validation covers record structure and joins; it does not verify
-    the file checksums listed in the manifest.
+    Access benchmark annotations and prepared scenes through configured data locations.
+    The annotations reader defines the split/stage selection; open_scene() provides
+    a scene context for query-time observations and separate supervision.
 
     Args:
-        dataset_root: EgoRecall data directory containing manifest.json.
-        split: Requested train, val, or test split, matching the dataset manifest.
-        stages: Exact stage number, inclusive LO:HI range, or None for all queries
-            present in the split's table. Training must be selected without stages.
+        paths: Configured dataset locations.
+        split: Benchmark split present in the annotation package.
+        stages: Exact stage, inclusive range, or None for all stored queries.
     """
 
-    def __init__(self, dataset_root: Path, split: str = "test", stages: int | str | None = None) -> None:
+    def __init__(self, paths: DatasetPaths, split: str = "test", stages: int | str | None = None) -> None:
         """
-        Load query, stage, and frame tables, validate their joins, and index
-        selected query keys. Scene annotation files are read by get_annotations().
+        Load query metadata; scene caches and geometry are opened separately.
 
         Args:
-            dataset_root: Local EgoRecall data directory containing manifest.json.
-            split: One available benchmark split.
-            stages: Exact stage, inclusive range, or all rows in the table with None.
+            paths: Configured dataset locations.
+            split: Benchmark split.
+            stages: Optional query-stage selection.
         """
-        if not isinstance(dataset_root, Path):
-            raise TypeError("dataset_root must be a pathlib.Path.")
-        if split not in ("train", "val", "test"):
-            raise ValueError(f"Unknown split {split!r}; use train, val, or test.")
-        self.root = dataset_root.expanduser().resolve()
-        self.split = cast(Split, split)
-        self.stage_range: StageRange | None = parse_stages(stages) if stages is not None else None
+        self.paths = paths
+        self.annotations = EgoRecallAnnotations(paths.dataset_root, split=split, stages=stages)
 
-        # Load the split's full query table before selecting stages.
-        manifest = self._read_json("manifest.json")
-        if not isinstance(manifest, dict):
-            raise ValueError("manifest.json must contain a JSON object.")
-        schema_version = require_integer(manifest["schema_version"], "manifest/schema_version", minimum=1)
-        if schema_version != 1:
-            raise ValueError(f"Unsupported package schema_version: {schema_version}.")
-        self._manifest = manifest
-        scenes = self._load_scenes()
-        queries = self._read_table("queries", QUERY_SCHEMA)
-        query_keys = self._query_keys(queries, "queries")
-        self._validate_scene_counts(queries, query_keys, scenes)
-
-        # Join stage assignments by keys; the downloaded subset may have large ID gaps.
-        stage_by_key = self._load_stages(query_keys)
-        selected: range | list[int]
-        if self.stage_range is None:
-            selected = range(len(query_keys))
-        else:
-            selected = [
-                position
-                for position, key in enumerate(query_keys)
-                if self.stage_range.first <= stage_by_key[key] <= self.stage_range.last
-            ]
-
-        # Reuse the immutable Arrow table when the selection includes every row.
-        if len(selected) == queries.num_rows:
-            self._queries = queries
-            self.query_keys = tuple(query_keys)
-            self._stage_by_key = stage_by_key
-        else:
-            self._queries = queries.take(pa.array(selected, type=pa.int64()))
-            self.query_keys = tuple(query_keys[position] for position in selected)
-            self._stage_by_key = {key: stage_by_key[key] for key in self.query_keys}
-        self._query_positions = {key: position for position, key in enumerate(self.query_keys)}
-        self.scene_ids = tuple(sorted({key[0] for key in self.query_keys}))
-        self._scenes = {scene_id: scenes[scene_id] for scene_id in self.scene_ids}
-
-        # Frame names are indexed explicitly, even if Parquet rows are reordered.
-        frames = self._read_table("frames", FRAME_SCHEMA)
-        all_frame_names = self._load_frame_names(frames, scenes)
-        self._frame_names = {scene_id: all_frame_names[scene_id] for scene_id in self.scene_ids}
-        self._validate_manifest_counts(queries.num_rows, len(stage_by_key), frames.num_rows, len(scenes))
-
-        # Validate selected queries in batches and collect each scene's target IDs.
-        self._target_ids: dict[str, set[int]] = defaultdict(set)
-        for query in self.iter_queries():
-            self._validate_query(query)
-            self._target_ids[query["scene_id"]].update(query["target_oids"])
-
-    def __len__(self) -> int:
+    def open_scene(self, scene_id: str) -> EgoRecallScene:
         """
-        Count queries in this reader's selection.
+        Open a prepared scene for query access and optional supervision.
+
+        Args:
+            scene_id: Scene represented by the query selection.
 
         Returns:
-            Number of selected query rows.
+            Scene context manager; close it after consuming its observation windows.
         """
-        return self._queries.num_rows
-
-    @property
-    def query_table(self) -> pa.Table:
-        """
-        Expose the selected Arrow table for column-oriented processing.
-
-        Returns:
-            Selected query rows as an immutable Arrow table.
-        """
-        return self._queries
-
-    def get_query(self, scene_id: str, query_idx: int) -> QueryRecord:
-        """
-        Look up a selected query by its stable key. Returned dictionaries are
-        fresh values, so caller edits do not modify subsequent lookups.
-
-        Args:
-            scene_id: Scene containing the query.
-            query_idx: Stable per-scene query identifier.
-
-        Returns:
-            The matching query record, including ground-truth target object IDs.
-        """
-        key = self._selected_key(scene_id, query_idx)
-        position = self._query_positions[key]
-        return cast(QueryRecord, self._queries.slice(position, 1).to_pylist()[0])
-
-    def iter_queries(self, batch_size: int = 1024) -> Iterator[QueryRecord]:
-        """
-        Iterate selected records in query-table order, converting Arrow batches
-        to Python dictionaries with at most batch_size records per batch.
-
-        Args:
-            batch_size: Maximum rows converted to Python together.
-
-        Returns:
-            Iterator of fresh query dictionaries containing the table's values.
-        """
-        require_integer(batch_size, "batch_size", minimum=1)
-        for batch in self._queries.to_batches(max_chunksize=batch_size):
-            yield from cast(list[QueryRecord], batch.to_pylist())
-
-    def stage_for(self, scene_id: str, query_idx: int) -> int | None:
-        """
-        Return the stage assigned to a selected query. Training queries return None.
-
-        Args:
-            scene_id: Scene containing the query.
-            query_idx: Stable per-scene query identifier.
-
-        Returns:
-            One-based stage assignment, or None for training.
-        """
-        key = self._selected_key(scene_id, query_idx)
-        if self.split == "train":
-            return None
-        return self._stage_by_key[key]
-
-    def get_scene(self, scene_id: str) -> SceneRecord:
-        """
-        Read metadata for a scene represented by selected queries. Counts cover
-        all rows stored for the scene and are unchanged by stage selection.
-
-        Args:
-            scene_id: A scene in this reader's selection.
-
-        Returns:
-            A fresh copy of the scene's record from scenes.json.
-        """
-        if scene_id not in self._scenes:
-            raise KeyError(f"Scene {scene_id!r} is not in the selected {self.split} queries.")
-        return self._scenes[scene_id].copy()
-
-    def frame_names(self, scene_id: str) -> tuple[str, ...]:
-        """
-        Return all frame names for a selected scene, ordered by canonical index.
-        The mapping covers the full timeline, including frames after a query's time.
-
-        Args:
-            scene_id: A scene in this reader's selection.
-
-        Returns:
-            Frame names ordered by zero-based canonical frame index.
-        """
-        return self._frame_names[scene_id]
-
-    def get_frame_name(self, scene_id: str, frame_idx: int) -> str:
-        """
-        Look up the source frame name for a canonical index using the frame table.
-
-        Args:
-            scene_id: A scene in this reader's selection.
-            frame_idx: Zero-based index on that scene's canonical timeline.
-
-        Returns:
-            The frame name stored at this index in the frame table.
-        """
-        names = self.frame_names(scene_id)
-        require_integer(frame_idx, "frame_idx")
-        if frame_idx >= len(names):
-            raise IndexError(f"{scene_id}: frame {frame_idx} is outside the {len(names)}-frame timeline.")
-        return names[frame_idx]
-
-    def get_annotations(self, scene_id: str) -> SceneAnnotations:
-        """
-        Load and validate a selected scene's full annotations on demand. All
-        filtered objects and the complete timeline are retained. Load once per
-        scene for repeated use; this method returns a fresh decoded record.
-
-        Args:
-            scene_id: A scene in this reader's selection.
-
-        Returns:
-            Full-scene supervision, including observations after individual queries.
-        """
-        scene = self._scenes[scene_id]
-        path = self._package_path(scene["annotations"])
-        with gzip.open(path, "rt", encoding="utf-8") as stream:
-            annotation = validate_annotations(json.load(stream), scene)
-
-        # Confirm that every target ID in the selected queries has an object annotation.
-        object_ids = {int(oid) for oid in annotation["objects"]}
-        missing = self._target_ids[scene_id] - object_ids
-        if missing:
-            raise ValueError(f"{scene_id}: target IDs have no annotation: {sorted(missing)}.")
-        return annotation
-
-    def _package_path(self, relative_path: str) -> Path:
-        """
-        Require metadata paths relative to dataset_root. File symlinks are allowed,
-        including cached downloads whose files link to an external blob store.
-
-        Args:
-            relative_path: Path from scene metadata or the table layout, relative to dataset_root.
-
-        Returns:
-            Absolute lexical path under dataset_root, without resolving file symlinks.
-        """
-        path = Path(relative_path)
-        if path.is_absolute() or ".." in path.parts:
-            raise ValueError(f"Package path must stay within the dataset directory: {relative_path!r}.")
-        return self.root / path
-
-    def _read_json(self, relative_path: str) -> object:
-        """
-        Decode a dataset JSON file before validating its specific record type.
-
-        Args:
-            relative_path: Filename relative to dataset_root.
-
-        Returns:
-            The decoded value, whose structure is checked by the calling loader.
-        """
-        with self._package_path(relative_path).open(encoding="utf-8") as stream:
-            return json.load(stream)
-
-    def _read_table(self, name: str, schema: pa.Schema) -> pa.Table:
-        """
-        Read one split table and reject incompatible columns or null fields.
-
-        Args:
-            name: Table directory, such as queries or frames.
-            schema: Required Arrow column names and types.
-
-        Returns:
-            The table with values and row order preserved from the Parquet file.
-        """
-        path = self._package_path(f"{name}/{self.split}.parquet")
-        if not path.is_file():
-            raise FileNotFoundError(f"Required {self.split} table is missing: {path}.")
-        table = pq.read_table(path)
-        if not table.schema.equals(schema, check_metadata=False):
-            raise ValueError(f"{name}: incompatible schema; expected {schema.names}, got {table.column_names}.")
-        if any(column.null_count for column in table.columns):
-            raise ValueError(f"{name}: null table fields are not allowed.")
-        return table
-
-    def _load_scenes(self) -> dict[str, SceneRecord]:
-        """
-        Load scenes.json and reject duplicate identities or an
-        unavailable split before attempting table reads.
-
-        Returns:
-            Scene records belonging to the requested split.
-        """
-        records = self._read_json("scenes.json")
-        if not isinstance(records, list):
-            raise ValueError("scenes.json must contain a list of scene records.")
-        scenes: dict[str, SceneRecord] = {}
-        for value in records:
-            scene = validate_scene(value)
-            scene_id = scene["scene_id"]
-            if scene_id in scenes:
-                raise ValueError(f"Duplicate scene metadata: {scene_id}.")
-            self._package_path(scene["annotations"])
-            scenes[scene_id] = scene
-
-        self.available_splits = tuple(
-            split for split in ("train", "val", "test") if any(scene["split"] == split for scene in scenes.values())
-        )
-        if self.split not in self.available_splits:
-            raise ValueError(f"Split {self.split!r} is not packaged; available splits: {self.available_splits}.")
-        return {scene_id: scene for scene_id, scene in scenes.items() if scene["split"] == self.split}
-
-    def _query_keys(self, table: pa.Table, name: str) -> list[QueryKey]:
-        """
-        Extract keys from a query or stage table. Require unique scene/query ID
-        pairs, valid identifiers, and membership in the requested split.
-
-        Args:
-            table: Schema-validated queries or stages table.
-            name: Table description used in errors.
-
-        Returns:
-            Stable keys in table row order.
-        """
-        if any(split != self.split for split in table["split"].to_pylist()):
-            raise ValueError(f"{name}: rows disagree with the requested split {self.split!r}.")
-        keys = list(zip(table["scene_id"].to_pylist(), table["query_idx"].to_pylist(), strict=True))
-        if len(keys) != len(set(keys)):
-            raise ValueError(f"{name}: duplicate (scene_id, query_idx) keys.")
-        for scene_id, query_idx in keys:
-            require_text(scene_id, f"{name}/scene_id")
-            require_integer(query_idx, f"{name}/query_idx")
-        return keys
-
-    def _validate_scene_counts(self, table: pa.Table, keys: list[QueryKey], scenes: dict[str, SceneRecord]) -> None:
-        """
-        Check scene membership and per-scene query counts against scenes.json
-        before applying the stage selection.
-
-        Args:
-            table: Full requested query split.
-            keys: Its stable row keys.
-            scenes: Metadata for all scenes in the split.
-        """
-        counts = Counter(scene_id for scene_id, _ in keys)
-        if set(counts) - set(scenes):
-            raise ValueError("queries: scene IDs are absent from the split's scene metadata.")
-        if table.num_rows == 0 or any(counts[scene_id] != scene["num_queries"] for scene_id, scene in scenes.items()):
-            raise ValueError("queries: row counts disagree with scenes.json or the split is empty.")
-
-    def _load_stages(self, query_keys: list[QueryKey]) -> dict[QueryKey, int]:
-        """
-        Join stage assignments to the query table and validate the requested
-        range against the stage numbers present in the assignment table.
-
-        Args:
-            query_keys: All query keys in the split's table, before stage selection.
-
-        Returns:
-            One stage per query key, or an empty mapping for unstaged training.
-        """
-        if self.split == "train":
-            if self.stage_range is not None:
-                raise ValueError("Training is unstaged; omit stages when reading train.")
-            if self._package_path("stages/train.parquet").exists():
-                raise ValueError("Training must be unstaged; found stages/train.parquet.")
-            self.available_stages: tuple[int, ...] = ()
-            return {}
-
-        table = self._read_table("stages", STAGE_SCHEMA)
-        keys = self._query_keys(table, "stages")
-        if set(keys) != set(query_keys):
-            raise ValueError("Query/stage membership differs; every packaged query needs one assignment.")
-        stages = table["stage"].to_pylist()
-        for stage in stages:
-            require_integer(stage, "stages/stage", minimum=1)
-        self.available_stages = tuple(sorted(set(stages)))
-
-        # Require every stage in the requested range to be present in the assignment table.
-        if self.stage_range is not None:
-            first, last = self.stage_range.first, self.stage_range.last
-            available = set(self.available_stages)
-            if (
-                first < min(available)
-                or last > max(available)
-                or any(i not in available for i in range(first, last + 1))
-            ):
-                raise ValueError(
-                    f"Requested stages {first}:{last} are not all packaged; available stages: {self.available_stages}."
-                )
-        return dict(zip(keys, stages, strict=True))
-
-    def _load_frame_names(self, table: pa.Table, scenes: dict[str, SceneRecord]) -> dict[str, tuple[str, ...]]:
-        """
-        Validate the scene/frame join and order names by their explicit index.
-
-        Args:
-            table: Frame mapping for all scenes in the split.
-            scenes: Metadata defining each scene's timeline length.
-
-        Returns:
-            Complete canonical frame-name sequences keyed by scene.
-        """
-        by_scene: dict[str, dict[int, str]] = defaultdict(dict)
-        for batch in table.to_batches(max_chunksize=8192):
-            for row in batch.to_pylist():
-                scene_id, frame_idx, name = row["scene_id"], row["frame_idx"], row["frame_name"]
-                if scene_id not in scenes:
-                    raise ValueError(f"frames: unknown scene {scene_id!r} in the {self.split} split.")
-                require_integer(frame_idx, "frames/frame_idx")
-                require_text(name, "frames/frame_name")
-                if frame_idx in by_scene[scene_id]:
-                    raise ValueError(f"{scene_id}: duplicate canonical frame index {frame_idx}.")
-                by_scene[scene_id][frame_idx] = name
-
-        ordered: dict[str, tuple[str, ...]] = {}
-        for scene_id, scene in scenes.items():
-            frames = by_scene[scene_id]
-            if set(frames) != set(range(scene["num_frames"])) or len(set(frames.values())) != len(frames):
-                raise ValueError(f"{scene_id}: incomplete or ambiguous canonical frame mapping.")
-            ordered[scene_id] = tuple(frames[i] for i in range(scene["num_frames"]))
-        return ordered
-
-    def _validate_manifest_counts(self, queries: int, stage_assignments: int, frames: int, scenes: int) -> None:
-        """
-        Compare table counts and stage assignments with the single-split manifest.
-        Require every manifest field used by this check and reject mismatched
-        splits, counts, or stage ranges.
-
-        Args:
-            queries: Number of query-table rows before stage selection.
-            stage_assignments: Number of query-to-stage assignment rows.
-            frames: Number of frame-mapping rows.
-            scenes: Number of scenes in the split.
-        """
-        selection = self._manifest["selection"]
-        if not isinstance(selection, dict):
-            raise ValueError("manifest/selection must contain a JSON object.")
-        if selection["split"] != self.split:
-            raise ValueError(f"Manifest selection does not match the requested {self.split} split.")
-
-        counts = self._manifest["counts"]
-        if not isinstance(counts, dict):
-            raise ValueError("manifest/counts must contain a JSON object.")
-        expected = {"queries": queries, "stage_assignments": stage_assignments, "frames": frames, "scenes": scenes}
-        for name, observed in expected.items():
-            declared = require_integer(counts[name], f"manifest/counts/{name}")
-            if declared != observed:
-                raise ValueError(f"manifest/counts/{name}: declared {declared}, found {observed}.")
-
-        if self.split != "train":
-            first = require_integer(selection["stage_from"], "manifest/stage_from", minimum=1)
-            last = require_integer(selection["stage_to"], "manifest/stage_to", minimum=first)
-            if last - first + 1 != len(self.available_stages) or self.available_stages != tuple(range(first, last + 1)):
-                raise ValueError("Packaged stages disagree with the range declared in manifest.json.")
-
-    def _validate_query(self, query: QueryRecord) -> None:
-        """
-        Check query time against the scene's frame count, validate the target-ID
-        partition, and check the nested program representation.
-
-        Args:
-            query: One selected record from the schema-validated Arrow table.
-        """
-        scene_id, query_idx = query["scene_id"], query["query_idx"]
-        context = f"{scene_id}/{query_idx}"
-        frame = require_integer(query["frame"], f"{context}/frame")
-        if frame >= self._scenes[query["scene_id"]]["num_frames"]:
-            raise ValueError(f"{context}: query frame is outside the canonical timeline.")
-        require_integer(query["program_depth"], f"{context}/program_depth", minimum=1)
-        require_text(query["description"], f"{context}/description")
-        require_text(query["source_query_id"], f"{context}/source_query_id")
-        reason = query["emit_reason"]
-        if reason not in ("new", "answer_change", "rebirth"):
-            raise ValueError(f"{context}: unknown emit_reason {reason!r}.")
-
-        # Every target occurs once, and visible/hidden IDs partition the answer.
-        for field in ("target_oids", "visible_target_oids", "hidden_target_oids"):
-            ids = query[field]
-            for oid in ids:
-                require_integer(oid, f"{context}/{field}", minimum=1)
-            if len(ids) != len(set(ids)):
-                raise ValueError(f"{context}: duplicate object IDs in {field}.")
-        targets = set(query["target_oids"])
-        visible, hidden = set(query["visible_target_oids"]), set(query["hidden_target_oids"])
-        if not targets or targets != visible | hidden or visible & hidden:
-            raise ValueError(f"{context}: visible/hidden IDs do not partition the target IDs.")
-        try:
-            decode_program(query["program_json"])
-        except ValueError as error:
-            raise ValueError(f"{context}: invalid program_json: {error}") from error
-
-    def _selected_key(self, scene_id: str, query_idx: int) -> QueryKey:
-        """
-        Require a valid scene/query ID pair belonging to this reader's selection.
-
-        Args:
-            scene_id: Scene identifier.
-            query_idx: Stable per-scene integer query identifier.
-
-        Returns:
-            The key after confirming it belongs to this selection.
-        """
-        require_text(scene_id, "scene_id")
-        require_integer(query_idx, "query_idx")
-        key = scene_id, query_idx
-        if key not in self._query_positions:
-            raise KeyError(f"Query {key} is not in the selected {self.split} queries.")
-        return key
+        return EgoRecallScene(self.paths, self.annotations, scene_id)

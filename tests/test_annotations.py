@@ -11,7 +11,7 @@ import pyarrow as pa
 import pyarrow.parquet as pq
 import pytest
 
-from egorecall.data import EgoRecallDataset, decode_program, parse_stages
+from egorecall.data import EgoRecallAnnotations, decode_program, parse_stages
 
 
 def test_stable_keys_and_stage_selection(package_root: Path) -> None:
@@ -21,16 +21,17 @@ def test_stable_keys_and_stage_selection(package_root: Path) -> None:
     Args:
         package_root: Synthetic package with three stages and two scenes.
     """
-    third = EgoRecallDataset(package_root, stages=3)
+    third = EgoRecallAnnotations(package_root, stages=3)
     assert third.query_keys == (("scene_a", 103),)
     assert third.stage_for("scene_a", 103) == 3
     assert third.get_query("scene_a", 103)["frame"] == 2
+
     with pytest.raises(KeyError):
         third.get_query("scene_a", 0)
     with pytest.raises(KeyError):
         third.get_query("scene_a", 4)
 
-    middle = EgoRecallDataset(package_root, stages="2:3")
+    middle = EgoRecallAnnotations(package_root, stages="2:3")
     assert middle.query_keys == (("scene_a", 17), ("scene_a", 103), ("scene_b", 4))
     assert middle.get_query("scene_b", 4)["scene_id"] == "scene_b"
     assert middle.available_stages == (1, 2, 3)
@@ -38,8 +39,8 @@ def test_stable_keys_and_stage_selection(package_root: Path) -> None:
     assert list(middle.iter_queries(batch_size=1)) == middle.query_table.to_pylist()
 
     # Selecting the full stage range preserves the complete query table and its order.
-    all_queries = EgoRecallDataset(package_root)
-    all_stages = EgoRecallDataset(package_root, stages="1:3")
+    all_queries = EgoRecallAnnotations(package_root)
+    all_stages = EgoRecallAnnotations(package_root, stages="1:3")
     assert all_queries.query_keys == (("scene_a", 4), ("scene_a", 17), ("scene_a", 103), ("scene_b", 4))
     assert all_stages.query_keys == all_queries.query_keys
     assert all_stages.query_table.equals(all_queries.query_table)
@@ -54,21 +55,23 @@ def test_full_scene_context_and_fresh_records(package_root: Path) -> None:
     Args:
         package_root: Synthetic package including an untargeted table object.
     """
-    dataset = EgoRecallDataset(package_root, stages=1)
-    query = dataset.get_query("scene_a", 4)
+    annotations = EgoRecallAnnotations(package_root, stages=1)
+    query = annotations.get_query("scene_a", 4)
     assert decode_program(query["program_json"]) == ["first_seen", "chair"]
+
     query["target_oids"].append(999)
-    assert dataset.get_query("scene_a", 4)["target_oids"] == [1]
+    assert annotations.get_query("scene_a", 4)["target_oids"] == [1]
 
     # Changes to returned metadata must not affect later annotation or frame lookups.
-    scene = dataset.get_scene("scene_a")
+    scene = annotations.get_scene("scene_a")
     scene["num_frames"] = 999
     scene["annotations"] = "annotations/nonexistent.json.gz"
-    assert dataset.get_scene("scene_a")["num_frames"] == 3
-    annotation = dataset.get_annotations("scene_a")
+    assert annotations.get_scene("scene_a")["num_frames"] == 3
+
+    annotation = annotations.get_annotations("scene_a")
     assert annotation["objects"]["2"]["label"] == "table"
     assert annotation["objects"]["1"]["visibility_segments"] == [[0, 1]]
-    assert dataset.frame_names("scene_a") == ("frame_000000", "frame_000010", "frame_000020")
+    assert annotations.frame_names("scene_a") == ("frame_000000", "frame_000010", "frame_000020")
 
 
 @pytest.mark.parametrize("scene_id", ["scene_b", "unknown_scene"])
@@ -80,15 +83,15 @@ def test_scene_access_requires_selection(package_root: Path, scene_id: str) -> N
         package_root: Synthetic package with only scene_a represented in stage 1.
         scene_id: Scene outside the reader's selection.
     """
-    dataset = EgoRecallDataset(package_root, stages=1)
+    annotations = EgoRecallAnnotations(package_root, stages=1)
     with pytest.raises(KeyError):
-        dataset.get_scene(scene_id)
+        annotations.get_scene(scene_id)
     with pytest.raises(KeyError):
-        dataset.frame_names(scene_id)
+        annotations.frame_names(scene_id)
     with pytest.raises(KeyError):
-        dataset.get_frame_name(scene_id, 0)
+        annotations.get_frame_name(scene_id, 0)
     with pytest.raises(KeyError):
-        dataset.get_annotations(scene_id)
+        annotations.get_annotations(scene_id)
 
 
 def test_reordered_frame_rows_use_explicit_indices(package_root: Path) -> None:
@@ -101,12 +104,14 @@ def test_reordered_frame_rows_use_explicit_indices(package_root: Path) -> None:
     path = package_root / "frames/test.parquet"
     table = pq.read_table(path)
     pq.write_table(table.take(list(reversed(range(len(table))))), path)
-    dataset = EgoRecallDataset(package_root)
-    assert dataset.get_frame_name("scene_a", 2) == "frame_000020"
+
+    annotations = EgoRecallAnnotations(package_root)
+    assert annotations.get_frame_name("scene_a", 2) == "frame_000020"
+
     with pytest.raises(ValueError):
-        dataset.get_frame_name("scene_a", -1)
+        annotations.get_frame_name("scene_a", -1)
     with pytest.raises(IndexError):
-        dataset.get_frame_name("scene_a", 3)
+        annotations.get_frame_name("scene_a", 3)
 
 
 @pytest.mark.parametrize("stages", [4, "1:4", "1:1000000000000"])
@@ -119,7 +124,7 @@ def test_unavailable_stage_range_fails(package_root: Path, stages: int | str) ->
         stages: Selection extending beyond the packaged stages.
     """
     with pytest.raises(ValueError, match="not all packaged"):
-        EgoRecallDataset(package_root, stages=stages)
+        EgoRecallAnnotations(package_root, stages=stages)
 
 
 @pytest.mark.parametrize("value", [0, -1, True, "0", "3:1", "1:", "1:2:3", "all", "1.5"])
@@ -142,12 +147,13 @@ def test_training_is_unstaged(package_root: Path) -> None:
     Args:
         package_root: Synthetic training package with no stage table.
     """
-    dataset = EgoRecallDataset(package_root, split="train")
-    assert len(dataset) == 4
-    assert dataset.available_stages == ()
-    assert dataset.stage_for("scene_a", 4) is None
+    annotations = EgoRecallAnnotations(package_root, split="train")
+    assert len(annotations) == 4
+    assert annotations.available_stages == ()
+    assert annotations.stage_for("scene_a", 4) is None
+
     with pytest.raises(ValueError, match="unstaged"):
-        EgoRecallDataset(package_root, split="train", stages=1)
+        EgoRecallAnnotations(package_root, split="train", stages=1)
 
 
 def test_unavailable_split_fails(package_root: Path) -> None:
@@ -158,7 +164,7 @@ def test_unavailable_split_fails(package_root: Path) -> None:
         package_root: A test-only package.
     """
     with pytest.raises(ValueError, match="not packaged"):
-        EgoRecallDataset(package_root, split="val")
+        EgoRecallAnnotations(package_root, split="val")
 
 
 @pytest.mark.parametrize("name", ["queries", "stages", "frames"])
@@ -173,8 +179,9 @@ def test_duplicate_keys_fail(package_root: Path, name: str) -> None:
     path = package_root / name / "test.parquet"
     table = pq.read_table(path)
     pq.write_table(pa.concat_tables([table, table.slice(0, 1)]), path)
+
     with pytest.raises(ValueError, match="[Dd]uplicate"):
-        EgoRecallDataset(package_root)
+        EgoRecallAnnotations(package_root)
 
 
 @pytest.mark.parametrize("name", ["stages", "frames"])
@@ -189,8 +196,9 @@ def test_missing_join_row_fails(package_root: Path, name: str) -> None:
     path = package_root / name / "test.parquet"
     table = pq.read_table(path)
     pq.write_table(table.slice(1), path)
+
     with pytest.raises(ValueError, match="membership differs|incomplete"):
-        EgoRecallDataset(package_root)
+        EgoRecallAnnotations(package_root)
 
 
 def test_wrong_query_schema_fails(package_root: Path) -> None:
@@ -204,8 +212,9 @@ def test_wrong_query_schema_fails(package_root: Path) -> None:
     table = pq.read_table(path)
     names = ["instance_id" if name == "source_query_id" else name for name in table.column_names]
     pq.write_table(table.rename_columns(names), path)
+
     with pytest.raises(ValueError, match="incompatible schema"):
-        EgoRecallDataset(package_root)
+        EgoRecallAnnotations(package_root)
 
 
 def test_invalid_query_time_fails(package_root: Path) -> None:
@@ -220,8 +229,9 @@ def test_invalid_query_time_fails(package_root: Path) -> None:
     records = table.to_pylist()
     records[0]["frame"] = 3
     pq.write_table(pa.Table.from_pylist(records, schema=table.schema), path)
+
     with pytest.raises(ValueError, match="outside the canonical timeline"):
-        EgoRecallDataset(package_root)
+        EgoRecallAnnotations(package_root)
 
 
 def test_missing_target_annotation_fails_on_access(package_root: Path) -> None:
@@ -235,9 +245,10 @@ def test_missing_target_annotation_fails_on_access(package_root: Path) -> None:
     annotation = json.loads(gzip.decompress(path.read_bytes()))
     annotation["objects"]["3"] = annotation["objects"].pop("1")
     path.write_bytes(gzip.compress(json.dumps(annotation).encode()))
-    dataset = EgoRecallDataset(package_root)
+
+    annotations = EgoRecallAnnotations(package_root)
     with pytest.raises(ValueError, match="target IDs have no annotation"):
-        dataset.get_annotations("scene_a")
+        annotations.get_annotations("scene_a")
 
 
 def test_symlinked_payloads_work(package_root: Path, tmp_path: Path) -> None:
@@ -252,7 +263,7 @@ def test_symlinked_payloads_work(package_root: Path, tmp_path: Path) -> None:
     blob = tmp_path / "cached_blob"
     payload.rename(blob)
     payload.symlink_to(blob)
-    assert len(EgoRecallDataset(package_root)) == 4
+    assert len(EgoRecallAnnotations(package_root)) == 4
 
 
 def test_annotation_path_cannot_escape_package(package_root: Path) -> None:
@@ -266,8 +277,9 @@ def test_annotation_path_cannot_escape_package(package_root: Path) -> None:
     scenes = json.loads(path.read_text())
     scenes[0]["annotations"] = "../outside.json.gz"
     path.write_text(json.dumps(scenes))
+
     with pytest.raises(ValueError, match="stay within"):
-        EgoRecallDataset(package_root)
+        EgoRecallAnnotations(package_root)
 
 
 @pytest.mark.parametrize(
@@ -299,8 +311,9 @@ def test_required_manifest_fields_fail_when_missing(package_root: Path, section:
     record = manifest if section is None else manifest[section]
     del record[key]
     path.write_text(json.dumps(manifest))
+
     with pytest.raises(KeyError, match=key):
-        EgoRecallDataset(package_root)
+        EgoRecallAnnotations(package_root)
 
 
 @pytest.mark.parametrize("section", ["selection", "counts"])
@@ -318,8 +331,9 @@ def test_malformed_manifest_records_fail(package_root: Path, section: str, value
     manifest = json.loads(path.read_text())
     manifest[section] = value
     path.write_text(json.dumps(manifest))
+
     with pytest.raises(ValueError, match=f"manifest/{section}"):
-        EgoRecallDataset(package_root)
+        EgoRecallAnnotations(package_root)
 
 
 def test_manifest_split_mismatch_fails(package_root: Path) -> None:
@@ -333,8 +347,9 @@ def test_manifest_split_mismatch_fails(package_root: Path) -> None:
     manifest = json.loads(path.read_text())
     manifest["selection"]["split"] = "val"
     path.write_text(json.dumps(manifest))
+
     with pytest.raises(ValueError, match="Manifest selection does not match"):
-        EgoRecallDataset(package_root)
+        EgoRecallAnnotations(package_root)
 
 
 def test_manifest_counts_require_integers(package_root: Path) -> None:
@@ -348,5 +363,6 @@ def test_manifest_counts_require_integers(package_root: Path) -> None:
     manifest = json.loads(path.read_text())
     manifest["counts"]["queries"] = 4.0
     path.write_text(json.dumps(manifest))
+
     with pytest.raises(ValueError, match="manifest/counts/queries"):
-        EgoRecallDataset(package_root)
+        EgoRecallAnnotations(package_root)

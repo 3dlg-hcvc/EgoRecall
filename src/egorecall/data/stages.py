@@ -41,6 +41,7 @@ def parse_stages(value: int | str) -> StageRange:
     """
     if type(value) is int:
         return StageRange(value, value)
+
     if not isinstance(value, str) or not re.fullmatch(r"[0-9]+(?::[0-9]+)?", value.strip()):
         raise ValueError("Use a positive stage number or an inclusive LO:HI range, such as 3 or 1:5.")
 
