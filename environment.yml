@@ -1,0 +1,10 @@
+name: egorecall
+channels:
+  - conda-forge
+dependencies:
+  - python=3.12
+  - pip
+  - setuptools>=68
+  - pyarrow>=18
+  - pytest>=8
+  - ruff>=0.11
