@@ -6,8 +6,7 @@ import argparse
 from pathlib import Path
 
 from egorecall.config import DatasetPaths
-from egorecall.data.annotations import EgoRecallAnnotations
-from egorecall.data.check import select_scenes
+from egorecall.data.metadata import load_scene_metadata
 from egorecall.data.prepare import prepare_scene
 from egorecall.data.scannetpp import ScanNetPPScene
 
@@ -35,7 +34,7 @@ def main() -> None:
 
     # Use scene selection and sampling settings from the annotation package,
     # or take them directly from the command line when preparing without annotations.
-    annotations = None
+    scenes = None
     if args.without_annotations:
         if not args.scenes or args.subsample_factor is None or args.split is not None or args.stages is not None:
             parser.error("--without-annotations requires --scenes and --subsample-factor, without --split or --stages.")
@@ -50,24 +49,25 @@ def main() -> None:
         if paths.dataset_root is None:
             parser.error("Preparation with annotations requires dataset_root in the configuration.")
 
-        annotations = EgoRecallAnnotations(paths.dataset_root, split=args.split, stages=args.stages)
-        scene_ids = select_scenes(annotations, args.scenes)
+        scenes = load_scene_metadata(paths.dataset_root, args.split, stages=args.stages, scene_ids=args.scenes)
+        scene_ids = tuple(scenes)
 
-    # Prepare each complete scene timeline, reusing compatible caches.
+    # Prepare all frames for each selected scene, reusing compatible caches.
     for scene_id in scene_ids:
         source = ScanNetPPScene(paths.scannetpp_root, scene_id)
         print(f"Preparing or validating {scene_id}...", flush=True)
 
-        if annotations is None:
+        if scenes is None:
             output = prepare_scene(source, paths.cache_root, subsample_factor=args.subsample_factor, ffmpeg=args.ffmpeg)
         else:
-            metadata = annotations.get_scene(scene_id)
+            scene = scenes[scene_id]
+            metadata = scene.metadata
             output = prepare_scene(
                 source,
                 paths.cache_root,
                 subsample_factor=metadata["subsample_factor"],
                 source_fps=metadata["source_fps"],
-                expected_frame_names=annotations.frame_names(scene_id),
+                expected_frame_names=scene.frame_names,
                 ffmpeg=args.ffmpeg,
             )
 

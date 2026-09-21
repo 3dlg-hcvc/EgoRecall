@@ -169,6 +169,106 @@ def test_preparation_without_annotations_needs_only_cache_inputs(
     assert "requires dataset_root" in capsys.readouterr().err
 
 
+def test_preparation_uses_only_scene_metadata(
+    package_root: Path, raw_root: Path, tmp_path: Path, ffmpeg_path: str, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """
+    Prepare an annotated scene without loading query contents or visibility files.
+
+    Args:
+        package_root: Metadata package whose query and visibility payloads will be removed.
+        raw_root: Source scene matching the package's timeline.
+        tmp_path: Configuration and cache parent.
+        ffmpeg_path: FFmpeg executable.
+        monkeypatch: Fixture supplying CLI arguments.
+    """
+    (package_root / "queries/test.parquet").unlink()
+    for path in (package_root / "annotations").iterdir():
+        path.unlink()
+    cache_root = tmp_path / "metadata_cache"
+    config = tmp_path / "paths.toml"
+    config.write_text(
+        f"[paths]\ndataset_root = {json.dumps(str(package_root))}\n"
+        f"scannetpp_root = {json.dumps(str(raw_root))}\ncache_root = {json.dumps(str(cache_root))}\n"
+    )
+
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        [
+            "egorecall-prepare",
+            "--config",
+            str(config),
+            "--split",
+            "test",
+            "--stages",
+            "1",
+            "--scenes",
+            "scene_a",
+            "--ffmpeg",
+            ffmpeg_path,
+        ],
+    )
+    prepare_scannetpp.main()
+
+    with SceneH5(cache_root / "scene_a.h5") as cache:
+        assert cache.frame_names == ("frame_000000", "frame_000010", "frame_000020")
+        assert cache.observation(1).depth[0, 0] == 1010
+    assert not (cache_root / "scene_b.h5").exists()
+
+
+def test_camera_access_is_independent_of_images(
+    package_root: Path, prepared_cache: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """
+    Read matching camera metadata without image access and keep returned arrays independent.
+
+    Args:
+        package_root: Query selection for the cached scene.
+        prepared_cache: Scene cache containing known camera values.
+        monkeypatch: Fixture used to reject any image read or decode attempt.
+    """
+    from egorecall.data import scene_h5
+
+    def unexpected_image_access(*args: object, **kwargs: object) -> None:
+        """
+        Fail if camera access tries to read or decode an image.
+
+        Args:
+            args: Positional image-access arguments.
+            kwargs: Keyword image-access arguments.
+        """
+        raise AssertionError("Camera access must not read or decode images.")
+
+    with SceneH5(prepared_cache / "scene_a.h5") as cache:
+        expected = cache.observation(1)
+        monkeypatch.setattr(SceneH5, "encoded_image", unexpected_image_access)
+        monkeypatch.setattr(scene_h5, "decode_image", unexpected_image_access)
+
+        camera = cache.camera(1)
+        assert camera.frame_idx == expected.frame_idx
+        assert camera.frame_name == expected.frame_name
+        assert camera.timestamp == expected.timestamp
+        for name in ("camera_to_world", "rgb_intrinsics", "depth_intrinsics"):
+            np.testing.assert_array_equal(getattr(camera, name), getattr(expected, name))
+            getattr(camera, name)[:] = 999
+            np.testing.assert_array_equal(getattr(cache.camera(1), name), getattr(expected, name))
+
+        for invalid in (-1, True, 1.0, 3):
+            with pytest.raises((ValueError, IndexError)):
+                cache.camera(invalid)
+
+    with EgoRecallDataset(DatasetPaths(package_root, cache_root=prepared_cache)).open_scene("scene_a") as scene:
+        window = scene.query(17).observations
+        camera = window.camera(1)
+        np.testing.assert_array_equal(camera.camera_to_world, expected.camera_to_world)
+        assert camera.frame_name == "frame_000010"
+
+        for invalid in (-1, True, 1.0, 2, 100):
+            with pytest.raises((ValueError, IndexError)):
+                window.camera(invalid)
+
+
 def test_source_checks_need_only_cache_inputs(package_root: Path, raw_root: Path, prepared_cache: Path) -> None:
     """
     Check source/cache consistency without unrelated assets, while still requiring source annotations.

@@ -13,7 +13,7 @@ from egorecall.config import DatasetPaths
 from egorecall.data.annotations import EgoRecallAnnotations
 from egorecall.data.records import QueryRecord, SceneAnnotations
 from egorecall.data.scannetpp import ObjectGeometry
-from egorecall.data.scene_h5 import Observation, SceneH5
+from egorecall.data.scene_h5 import FrameCamera, Observation, SceneH5
 from egorecall.data.validation import require_integer
 
 
@@ -91,6 +91,19 @@ class ObservationWindow:
         """
         self._require_frame(frame_idx)
         return self._cache.observation(frame_idx)
+
+    def camera(self, frame_idx: int) -> FrameCamera:
+        """
+        Read an available frame's camera metadata without decoding its images.
+
+        Args:
+            frame_idx: Zero-based canonical index within this query's history.
+
+        Returns:
+            Frame identity, timestamp, pose, and RGB/depth intrinsics with fresh arrays.
+        """
+        self._require_frame(frame_idx)
+        return self._cache.camera(frame_idx)
 
     def encoded_image(self, frame_idx: int, kind: str = "rgb") -> bytes:
         """

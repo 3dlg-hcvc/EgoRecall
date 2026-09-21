@@ -12,9 +12,10 @@ from typing import cast
 import pyarrow as pa
 import pyarrow.parquet as pq
 
+from egorecall.data.metadata import index_frame_names
 from egorecall.data.records import QueryKey, QueryRecord, SceneAnnotations, SceneRecord, Split, decode_program
-from egorecall.data.schema import FRAME_SCHEMA, QUERY_SCHEMA, STAGE_SCHEMA
-from egorecall.data.stages import StageRange, parse_stages
+from egorecall.data.schema import FRAME_SCHEMA, QUERY_SCHEMA, STAGE_SCHEMA, validate_table
+from egorecall.data.stages import StageRange, parse_stages, require_stage_range
 from egorecall.data.validation import require_integer, require_text, validate_annotations, validate_scene
 
 
@@ -100,7 +101,7 @@ class EgoRecallAnnotations:
 
         # Frame names are indexed explicitly, even if Parquet rows are reordered.
         frames = self._read_table("frames", FRAME_SCHEMA)
-        all_frame_names = self._load_frame_names(frames, scenes)
+        all_frame_names = index_frame_names(frames, scenes)
         self._frame_names = {scene_id: all_frame_names[scene_id] for scene_id in self.scene_ids}
         self._validate_manifest_counts(queries.num_rows, len(stage_by_key), frames.num_rows, len(scenes))
 
@@ -290,10 +291,7 @@ class EgoRecallAnnotations:
             raise FileNotFoundError(f"Required {self.split} table is missing: {path}.")
 
         table = pq.read_table(path)
-        if not table.schema.equals(schema, check_metadata=False):
-            raise ValueError(f"{name}: incompatible schema; expected {schema.names}, got {table.column_names}.")
-        if any(column.null_count for column in table.columns):
-            raise ValueError(f"{name}: null table fields are not allowed.")
+        validate_table(table, schema, name)
         return table
 
     def _load_scenes(self) -> dict[str, SceneRecord]:
@@ -394,48 +392,8 @@ class EgoRecallAnnotations:
 
         # Require every stage in the requested range to be present in the assignment table.
         if self.stage_range is not None:
-            first, last = self.stage_range.first, self.stage_range.last
-            available = set(self.available_stages)
-            if (
-                first < min(available)
-                or last > max(available)
-                or any(i not in available for i in range(first, last + 1))
-            ):
-                raise ValueError(
-                    f"Requested stages {first}:{last} are not all packaged; available stages: {self.available_stages}."
-                )
+            require_stage_range(self.stage_range, self.available_stages)
         return dict(zip(keys, stages, strict=True))
-
-    def _load_frame_names(self, table: pa.Table, scenes: dict[str, SceneRecord]) -> dict[str, tuple[str, ...]]:
-        """
-        Validate the scene/frame join and order names by their explicit index.
-
-        Args:
-            table: Frame mapping for all scenes in the split.
-            scenes: Metadata defining each scene's timeline length.
-
-        Returns:
-            Complete canonical frame-name sequences keyed by scene.
-        """
-        by_scene: dict[str, dict[int, str]] = defaultdict(dict)
-        for batch in table.to_batches(max_chunksize=8192):
-            for row in batch.to_pylist():
-                scene_id, frame_idx, name = row["scene_id"], row["frame_idx"], row["frame_name"]
-                if scene_id not in scenes:
-                    raise ValueError(f"frames: unknown scene {scene_id!r} in the {self.split} split.")
-                require_integer(frame_idx, "frames/frame_idx")
-                require_text(name, "frames/frame_name")
-                if frame_idx in by_scene[scene_id]:
-                    raise ValueError(f"{scene_id}: duplicate canonical frame index {frame_idx}.")
-                by_scene[scene_id][frame_idx] = name
-
-        ordered: dict[str, tuple[str, ...]] = {}
-        for scene_id, scene in scenes.items():
-            frames = by_scene[scene_id]
-            if set(frames) != set(range(scene["num_frames"])) or len(set(frames.values())) != len(frames):
-                raise ValueError(f"{scene_id}: incomplete or ambiguous canonical frame mapping.")
-            ordered[scene_id] = tuple(frames[i] for i in range(scene["num_frames"]))
-        return ordered
 
     def _validate_manifest_counts(self, queries: int, stage_assignments: int, frames: int, scenes: int) -> None:
         """

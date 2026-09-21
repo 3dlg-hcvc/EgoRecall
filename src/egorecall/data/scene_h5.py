@@ -78,6 +78,28 @@ OBJECT_ARRAY_SHAPES = {"centroid": (3,), "axes": (3, 3), "lengths": (3,), "minim
 
 
 @dataclass(frozen=True)
+class FrameCamera:
+    """
+    Camera metadata for one canonical frame, with independently owned arrays.
+
+    Args:
+        frame_idx: Zero-based canonical index.
+        frame_name: Corresponding source frame name.
+        timestamp: Source timestamp in seconds.
+        camera_to_world: Mesh-aligned 4x4 camera-to-world transform in metres.
+        rgb_intrinsics: Pinhole intrinsics at native RGB resolution.
+        depth_intrinsics: Pinhole intrinsics scaled to the sensor-depth grid.
+    """
+
+    frame_idx: int
+    frame_name: str
+    timestamp: float
+    camera_to_world: NDArray[np.float64]
+    rgb_intrinsics: NDArray[np.float64]
+    depth_intrinsics: NDArray[np.float64]
+
+
+@dataclass(frozen=True)
 class Observation:
     """
     One RGB-D observation and its source camera, with no object annotations.
@@ -336,6 +358,27 @@ class SceneH5:
             raise ValueError(f"{self.path}: checksum mismatch at {kind} frame {frame_idx}.")
         return payload
 
+    def camera(self, frame_idx: int) -> FrameCamera:
+        """
+        Return camera metadata from memory without reading or decoding image payloads.
+
+        Args:
+            frame_idx: Zero-based canonical index within the cache timeline.
+
+        Returns:
+            Frame identity, timestamp, pose, and RGB/depth intrinsics with fresh arrays.
+        """
+        self._require_frame(frame_idx)
+        intrinsic = self._cameras.intrinsics[frame_idx].copy()
+        return FrameCamera(
+            frame_idx=frame_idx,
+            frame_name=self.frame_names[frame_idx],
+            timestamp=float(self._cameras.timestamps[frame_idx]),
+            camera_to_world=self._cameras.camera_to_world[frame_idx].copy(),
+            rgb_intrinsics=intrinsic,
+            depth_intrinsics=scale_intrinsics(intrinsic, self.image_size, DEPTH_SIZE),
+        )
+
     def observation(self, frame_idx: int) -> Observation:
         """
         Decode one frame with independently owned image and camera arrays.
@@ -346,25 +389,24 @@ class SceneH5:
         Returns:
             Native RGB, sensor depth, anonymization mask, pose, and scaled intrinsics.
         """
-        self._require_frame(frame_idx)
+        camera = self.camera(frame_idx)
 
         # Decode the image payloads at their native RGB and sensor-depth resolutions.
         rgb = cast(NDArray[np.uint8], decode_image(self.encoded_image(frame_idx, "rgb"), "rgb", self.image_size))
         depth = cast(NDArray[np.uint16], decode_image(self.encoded_image(frame_idx, "depth"), "depth", DEPTH_SIZE))
         mask = cast(NDArray[np.uint8], decode_image(self.encoded_image(frame_idx, "mask"), "mask", self.image_size))
 
-        # Copy camera values and scale intrinsics for the returned depth grid.
-        intrinsic = self._cameras.intrinsics[frame_idx].copy()
+        # Combine the decoded images with the independently owned camera metadata.
         return Observation(
-            frame_idx,
-            self.frame_names[frame_idx],
-            float(self._cameras.timestamps[frame_idx]),
-            rgb,
-            depth,
-            mask,
-            self._cameras.camera_to_world[frame_idx].copy(),
-            intrinsic,
-            scale_intrinsics(intrinsic, self.image_size, DEPTH_SIZE),
+            frame_idx=camera.frame_idx,
+            frame_name=camera.frame_name,
+            timestamp=camera.timestamp,
+            rgb=rgb,
+            depth=depth,
+            mask=mask,
+            camera_to_world=camera.camera_to_world,
+            rgb_intrinsics=camera.rgb_intrinsics,
+            depth_intrinsics=camera.depth_intrinsics,
         )
 
     def _require_frame(self, frame_idx: int) -> None:

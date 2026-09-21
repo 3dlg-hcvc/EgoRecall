@@ -182,6 +182,13 @@ Add `--scenes SCENE_ID` to prepare one scene first. Stages choose which scenes t
 prepare; every selected scene retains its complete canonical timeline. Preparation
 requires the source pose timeline to match the dataset's frame table exactly.
 
+Preparation reads `manifest.json`, `scenes.json`, and frame rows for the selected
+scenes. When `--stages` is supplied, it also reads the scene/split/stage columns
+of the stage-assignment table. It does not read query contents or per-scene
+visibility annotations. Preparation checks the package format, scene/stage selection,
+and selected frame mappings. Use `egorecall-check` for package-wide counts and
+query/annotation consistency checks.
+
 Each scene produces `cache_root/<scene_id>.h5`, containing encoded RGB JPEGs,
 sensor-depth PNGs, anonymization-mask PNGs, camera matrices, timestamps, and all
 source object IDs, labels, oriented boxes, and axis-aligned boxes. It also stores
@@ -247,6 +254,10 @@ with dataset.open_scene(scene_id) as scene:
     print(observation.rgb.shape, observation.depth.dtype)
     print(observation.camera_to_world, observation.depth_intrinsics)
 
+    # Read just camera metadata when images are not needed.
+    camera = sample.observations.camera(sample.query.frame)
+    print(camera.timestamp, camera.camera_to_world)
+
     # Request ground truth separately for inspection or evaluation.
     answer = scene.answer(query_idx)
     truth = scene.supervision
@@ -266,6 +277,13 @@ the query frame. Negative, noninteger, and future-frame indices raise errors.
 The window can be iterated, or accessed as encoded images with
 `sample.observations.encoded_image(frame_idx, "rgb")`. Keep the scene context open
 while using its windows; closing it closes the HDF5 handle.
+
+`sample.observations.camera(frame_idx)` returns a `FrameCamera` containing the
+frame index/name, timestamp, pose, and RGB/depth intrinsics. It reads no image
+payloads and enforces the same query-time cutoff as `frame()` and `encoded_image()`.
+Returned camera arrays are independent copies. Full-timeline tools can use
+`SceneH5.camera(frame_idx)` directly; `observation()` includes the same camera
+values alongside decoded RGB, depth, and masks.
 
 `scene.supervision` joins full-scene annotations to cached geometry on first
 access and retains them for that scene context. `source_objects` contains every ScanNet++

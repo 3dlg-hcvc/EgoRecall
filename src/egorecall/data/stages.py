@@ -48,3 +48,17 @@ def parse_stages(value: int | str) -> StageRange:
     # Reusing the first number for a singleton preserves exact-stage selection.
     parts = value.strip().split(":")
     return StageRange(int(parts[0]), int(parts[-1]))
+
+
+def require_stage_range(selection: StageRange, available: tuple[int, ...]) -> None:
+    """
+    Require every stage in an inclusive selection to be available.
+
+    Args:
+        selection: Requested stage bounds.
+        available: Stage numbers present in the assignment table.
+    """
+    first, last = selection.first, selection.last
+    stages = set(available)
+    if not stages or first < min(stages) or last > max(stages) or any(i not in stages for i in range(first, last + 1)):
+        raise ValueError(f"Requested stages {first}:{last} are not all packaged; available stages: {available}.")

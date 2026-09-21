@@ -12,6 +12,7 @@ from egorecall.config import DatasetPaths
 from egorecall.data.annotations import EgoRecallAnnotations
 from egorecall.data.dataset import join_supervision
 from egorecall.data.integrity import fingerprint_file, relative_file
+from egorecall.data.metadata import select_scene_ids
 from egorecall.data.scannetpp import ScanNetPPScene
 from egorecall.data.scene_h5 import SceneH5
 from egorecall.data.validation import require_integer
@@ -77,29 +78,6 @@ def verify_package(root: Path) -> int:
     return len(files)
 
 
-def select_scenes(annotations: EgoRecallAnnotations, scene_ids: list[str] | None) -> tuple[str, ...]:
-    """
-    Restrict scene work to an explicit subset of a dataset's selected queries.
-
-    Args:
-        annotations: Annotation reader defining scene availability.
-        scene_ids: Requested scene IDs, or None for all represented scenes.
-
-    Returns:
-        Unique scene IDs in the supplied order, or the reader's scene order.
-    """
-    if scene_ids is None:
-        return annotations.scene_ids
-
-    if not scene_ids or len(scene_ids) != len(set(scene_ids)):
-        raise ValueError("Scene selection must be nonempty and contain no duplicates.")
-
-    missing = set(scene_ids) - set(annotations.scene_ids)
-    if missing:
-        raise KeyError(f"Scenes are absent from the selected queries: {sorted(missing)}.")
-    return tuple(scene_ids)
-
-
 def check_dataset(
     paths: DatasetPaths,
     *,
@@ -137,7 +115,7 @@ def check_dataset(
     with (paths.dataset_root / "manifest.json").open(encoding="utf-8") as stream:
         manifest = json.load(stream)
     annotations = EgoRecallAnnotations(paths.dataset_root, split=manifest["selection"]["split"])
-    selected = set(select_scenes(annotations, scene_ids))
+    selected = set(select_scene_ids(annotations.scene_ids, scene_ids))
 
     source_count = cache_count = decoded = 0
     object_count = 0
