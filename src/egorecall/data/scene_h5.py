@@ -1,11 +1,11 @@
 """
-Read prepared RGB, depth, masks, and cameras from one HDF5 observation cache per scene.
+Read prepared observations, cameras, and source object geometry from one HDF5 cache per scene.
 
-HDF5 layout (N is the number of frames in the complete canonical timeline):
+HDF5 layout (N is the number of canonical frames; M is the number of source objects):
 
   /                            Root attributes:
                                  format = "egorecall-observations"
-                                 schema_version = 1
+                                 schema_version = 2
                                  scene_id: source scene identifier
                                  source_fps: nominal source frame rate, normally 60.0
                                  subsample_factor: sorted pose-record stride, normally 10
@@ -26,12 +26,23 @@ HDF5 layout (N is the number of frames in the complete canonical timeline):
   /camera/intrinsic            (N, 3, 3) float64: pinhole matrices at native RGB resolution
   /camera/timestamp            (N,) float64: source sensor timestamps, seconds
 
-All datasets share the same zero-based canonical frame index; /frames/names maps
-that index to the source frame name. Each image entry stores compressed bytes.
+  /objects                    Group attribute sha256: checksum of IDs, labels, and box values
+  /objects/object_id          (M,) int64: all source objectId values, in increasing order
+  /objects/label              (M,) UTF-8 strings: source semantic labels
+  /objects/centroid           (M, 3) float64: oriented-box centres, metres
+  /objects/axes               (M, 3, 3) float64: orthonormal box axes stored as rows
+  /objects/lengths            (M, 3) float64: full box side lengths along each axis, metres
+  /objects/minimum            (M, 3) float64: axis-aligned box minima, metres
+  /objects/maximum            (M, 3) float64: axis-aligned box maxima, metres
+
+Frame and camera datasets share the same zero-based canonical index; /frames/names
+maps that index to the source frame name. Each image entry stores compressed bytes.
 Decoded RGB has shape (height, width, 3) in RGB order, masks have shape (height, width),
 and depth has shape (192, 256) in uint16 millimetres, with zero indicating invalid depth.
 Depth intrinsics are computed by scaling the RGB intrinsics to the sensor-depth grid.
 Camera axes are x-right, y-down, z-forward in a mesh-aligned world with Z pointing up.
+Object rows are aligned by /objects/object_id and retain the complete source population.
+The objects checksum uses the canonical JSON representation in object_geometry_sha256().
 """
 
 from __future__ import annotations
@@ -50,11 +61,20 @@ from numpy.typing import NDArray
 
 from egorecall.data.integrity import FileFingerprint
 from egorecall.data.media import decode_image
-from egorecall.data.scannetpp import DEPTH_SIZE, CameraSequence, scale_intrinsics, validate_cameras
-from egorecall.data.validation import require_integer
+from egorecall.data.scannetpp import (
+    DEPTH_SIZE,
+    CameraSequence,
+    ObjectGeometry,
+    object_geometry_sha256,
+    scale_intrinsics,
+    validate_cameras,
+    validate_object_geometry,
+)
+from egorecall.data.validation import require_integer, require_text
 
-CACHE_VERSION = 1
+CACHE_VERSION = 2
 IMAGE_DATASETS = {"rgb": "rgb_jpg", "depth": "depth_png", "mask": "mask_png"}
+OBJECT_ARRAY_SHAPES = {"centroid": (3,), "axes": (3, 3), "lengths": (3,), "minimum": (3,), "maximum": (3,)}
 
 
 @dataclass(frozen=True)
@@ -87,19 +107,19 @@ class Observation:
 
 class SceneH5:
     """
-    Open an observation cache and validate its structure. Use as a context manager
-    to close the HDF5 handle. Encoded-frame checksums are verified when read.
+    Open a scene cache and validate its structure and object geometry. Use as a
+    context manager to close the HDF5 handle. Encoded-frame checksums are verified when read.
 
     Args:
-        path: Prepared scene HDF5 file.
+        path: Prepared scene HDF5 file containing observations and source geometry.
     """
 
     def __init__(self, path: Path) -> None:
         """
-        Open a completed cache and validate metadata, cameras, and frame datasets.
+        Open a completed cache and validate metadata, cameras, frame datasets, and objects.
 
         Args:
-            path: Observation-cache path.
+            path: Scene-cache path.
         """
         self.path = path
         self._file = h5py.File(path, "r")
@@ -111,11 +131,14 @@ class SceneH5:
 
     def _validate_structure(self) -> None:
         """
-        Require the observation-cache schema and complete, consistent frame arrays.
+        Require the scene-cache schema and complete, consistent frame and object arrays.
         """
         attrs = self._file.attrs
         if attrs["format"] != "egorecall-observations" or attrs["schema_version"] != CACHE_VERSION:
-            raise ValueError(f"{self.path}: unsupported observation-cache format.")
+            raise ValueError(
+                f"{self.path}: expected scene-cache schema {CACHE_VERSION} with object geometry; "
+                "recreate this cache using the current preparation command in a new cache directory."
+            )
 
         for name in ("schema_version", "subsample_factor"):
             if isinstance(attrs[name], (bool, np.bool_)) or not isinstance(attrs[name], (int, np.integer)):
@@ -177,6 +200,71 @@ class SceneH5:
             if not isinstance(value["sha256"], str) or not re.fullmatch(r"[0-9a-f]{64}", value["sha256"]):
                 raise ValueError(f"{name}: invalid source SHA-256 digest.")
         self._source_files = cast(dict[str, FileFingerprint], fingerprints)
+        if "scans/segments_anno.json" not in self._source_files:
+            raise ValueError("Cache source_files must include scans/segments_anno.json.")
+
+        # Load the small geometry table once and verify it independently of raw files.
+        self._objects = self._load_objects()
+
+    def _load_objects(self) -> dict[int, ObjectGeometry]:
+        """
+        Validate object columns, construct typed geometry, and verify the stored checksum.
+
+        Returns:
+            Full source-object population owned by this cache reader.
+        """
+        group = self._file["objects"]
+        ids = group["object_id"]
+        if ids.ndim != 1 or ids.dtype != np.dtype(np.int64):
+            raise ValueError("objects/object_id must be a one-dimensional int64 array.")
+        object_ids = ids[:]
+        if np.any(object_ids <= 0) or np.any(object_ids[1:] <= object_ids[:-1]):
+            raise ValueError("Cached object IDs must be positive, unique, and increasing.")
+        count = len(object_ids)
+
+        labels = group["label"]
+        string_type = h5py.check_string_dtype(labels.dtype)
+        if labels.shape != (count,) or string_type is None or string_type.encoding != "utf-8":
+            raise ValueError("objects/label must contain one UTF-8 label per object.")
+        names = labels.asstr()[:]
+
+        arrays: dict[str, NDArray[np.float64]] = {}
+        for name, shape in OBJECT_ARRAY_SHAPES.items():
+            column = group[name]
+            if column.shape != (count, *shape) or column.dtype != np.dtype(np.float64):
+                raise ValueError(f"objects/{name} must be a float64 array with shape {(count, *shape)}.")
+            arrays[name] = column[:]
+
+        objects: dict[int, ObjectGeometry] = {}
+        for position, value in enumerate(object_ids):
+            oid = int(value)
+            context = f"{self.scene_id}/{oid}"
+            label = require_text(names[position], f"{context}/label")
+            obj = ObjectGeometry(
+                oid,
+                label,
+                arrays["centroid"][position],
+                arrays["axes"][position],
+                arrays["lengths"][position],
+                arrays["minimum"][position],
+                arrays["maximum"][position],
+            )
+            validate_object_geometry(obj, context)
+            objects[oid] = obj
+
+        self._objects_sha256 = object_geometry_sha256(objects)
+        if self._objects_sha256 != group.attrs["sha256"]:
+            raise ValueError(f"{self.path}: object geometry checksum mismatch.")
+        return objects
+
+    def objects(self) -> dict[int, ObjectGeometry]:
+        """
+        Read all cached source objects with independently owned geometry arrays.
+
+        Returns:
+            Object IDs, labels, and boxes, including objects outside the EgoRecall filtered population.
+        """
+        return {oid: obj.copy() for oid, obj in self._objects.items()}
 
     def validate_compatibility(
         self,
@@ -187,10 +275,11 @@ class SceneH5:
         *,
         cameras: CameraSequence | None = None,
         source_files: dict[str, FileFingerprint] | None = None,
+        objects: dict[int, ObjectGeometry] | None = None,
     ) -> None:
         """
         Require matching scene identity and timeline before using or reusing a cache.
-        Source arrays and fingerprints can additionally verify the original download.
+        Source cameras, objects, and fingerprints can additionally verify the original download.
 
         Args:
             scene_id: Expected source scene.
@@ -199,6 +288,7 @@ class SceneH5:
             source_fps: Nominal source frame rate.
             cameras: Source camera records, when checking against the raw download.
             source_files: Current source fingerprints, when checking cache reuse.
+            objects: Source object geometry, when checking against the raw download.
         """
         if (
             self.scene_id != scene_id
@@ -223,6 +313,9 @@ class SceneH5:
                 )
             ):
                 raise ValueError(f"{self.path}: cached camera values differ from the source.")
+
+        if objects is not None and object_geometry_sha256(objects) != self._objects_sha256:
+            raise ValueError(f"{self.path}: cached object geometry differs from the source.")
 
     def encoded_image(self, frame_idx: int, kind: str) -> bytes:
         """

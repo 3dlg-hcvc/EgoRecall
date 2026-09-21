@@ -18,8 +18,8 @@ from egorecall.data.check import check_dataset, verify_package
 from egorecall.data.integrity import fingerprint_file
 from egorecall.data.media import decode_image, extract_video_frames
 from egorecall.data.prepare import prepare_scene
-from egorecall.data.scannetpp import ScanNetPPScene, scale_intrinsics
-from egorecall.data.scene_h5 import SceneH5
+from egorecall.data.scannetpp import ScanNetPPScene, object_geometry_sha256, scale_intrinsics
+from egorecall.data.scene_h5 import CACHE_VERSION, SceneH5
 from scannetpp_common.iphone import iter_depth_frames
 
 
@@ -268,7 +268,7 @@ def test_corrupt_cached_payload_fails(prepared_cache: Path) -> None:
 @pytest.mark.parametrize(
     ("attribute", "value"),
     [
-        ("schema_version", 1.0),
+        ("schema_version", float(CACHE_VERSION)),
         ("subsample_factor", 10.5),
         ("rgb_resolution", [32.5, 24.0]),
         ("scene_id", "../scene_a"),
@@ -317,14 +317,17 @@ def test_video_selection_uses_source_indices(
 
 
 @pytest.mark.parametrize("change", ["missing", "label"])
-def test_source_object_join_fails(package_root: Path, raw_root: Path, prepared_cache: Path, change: str) -> None:
+def test_source_object_join_fails(
+    package_root: Path, raw_root: Path, tmp_path: Path, ffmpeg_path: str, change: str
+) -> None:
     """
-    Reject incomplete or inconsistent source-object joins before exposing supervision.
+    Reject cached objects that are missing from, or inconsistent with, the annotation population.
 
     Args:
         package_root: Two-object visibility annotation.
         raw_root: Source objects to corrupt.
-        prepared_cache: Compatible observation cache.
+        tmp_path: Cache parent.
+        ffmpeg_path: FFmpeg executable.
         change: Remove a required object or change its label.
     """
     path = raw_root / "data/scene_a/scans/segments_anno.json"
@@ -335,14 +338,20 @@ def test_source_object_join_fails(package_root: Path, raw_root: Path, prepared_c
         source["segGroups"][0]["label"] = "desk"
     path.write_text(json.dumps(source))
 
-    dataset = EgoRecallDataset(DatasetPaths(package_root, raw_root, prepared_cache))
+    cache_root = tmp_path / "changed_objects_cache"
+    prepare_scene(ScanNetPPScene(raw_root, "scene_a"), cache_root, ffmpeg=ffmpeg_path)
+    dataset = EgoRecallDataset(DatasetPaths(package_root, cache_root=cache_root))
     with dataset.open_scene("scene_a") as scene, pytest.raises((KeyError, ValueError)):
         scene.supervision
 
+    _add_manifest_hashes(package_root)
+    with pytest.raises((KeyError, ValueError)):
+        check_dataset(DatasetPaths(package_root, cache_root=cache_root), scene_ids=["scene_a"], check_cache=True)
 
-def test_observations_without_raw_source(package_root: Path, prepared_cache: Path) -> None:
+
+def test_observations_and_supervision_without_raw_source(package_root: Path, prepared_cache: Path) -> None:
     """
-    Use prepared observations without reopening raw assets; geometry still requires its source.
+    Read observations, answers, and full scene supervision with no raw source configured.
 
     Args:
         package_root: Query annotations.
@@ -356,12 +365,161 @@ def test_observations_without_raw_source(package_root: Path, prepared_cache: Pat
         assert sample.observations.frame(0).depth[0, 0] == 1000
         with pytest.raises(AttributeError):
             sample.observations.frame_names = ("frame_000000", "frame_000010")
-        with pytest.raises(ValueError, match="scannetpp_root"):
-            scene.supervision
+        assert scene.answer(query_idx)["target_oids"] == [1]
+        assert set(scene.supervision.source_objects) == {1, 2, 3}
+        assert set(scene.supervision.filtered_objects) == {1, 2}
+        assert scene.supervision.source_objects[3].label == "lamp"
         with pytest.raises(KeyError):
             scene.query(17)
     with pytest.raises(KeyError):
         dataset.open_scene("scene_b")
+
+
+def test_cached_geometry_survives_unavailable_raw_source(
+    package_root: Path, raw_root: Path, prepared_cache: Path
+) -> None:
+    """
+    Keep supervision and cache checks usable after the configured raw directory becomes unavailable.
+
+    Args:
+        package_root: Query annotations.
+        raw_root: Source directory to move after preparation.
+        prepared_cache: Completed scene cache.
+    """
+    source_objects = ScanNetPPScene(raw_root, "scene_a").objects()
+    paths = DatasetPaths(package_root, raw_root, prepared_cache)
+    raw_root.rename(raw_root.with_name("disconnected_source"))
+
+    with EgoRecallDataset(paths).open_scene("scene_a") as scene:
+        assert scene.query(17).observations.frame(1).frame_name == "frame_000010"
+        assert set(scene.supervision.source_objects) == set(source_objects)
+        for oid, expected in source_objects.items():
+            actual = scene.supervision.source_objects[oid]
+            assert actual.label == expected.label
+            for name in ("centroid", "axes", "lengths", "minimum", "maximum"):
+                np.testing.assert_array_equal(getattr(actual, name), getattr(expected, name))
+
+    _add_manifest_hashes(package_root)
+    report = check_dataset(paths, scene_ids=["scene_a"], check_cache=True, decode_all=True)
+    assert report.source_scenes == 0 and report.cache_scenes == 1 and report.frames_decoded == 3
+
+
+def test_cached_geometry_is_independently_owned(prepared_cache: Path) -> None:
+    """
+    Caller edits to object records must not change later cache lookups.
+
+    Args:
+        prepared_cache: Completed scene cache.
+    """
+    with SceneH5(prepared_cache / "scene_a.h5") as cache:
+        objects = cache.objects()
+        objects[1].centroid[:] = 999
+        del objects[2]
+        fresh = cache.objects()
+        np.testing.assert_array_equal(fresh[1].centroid, [1, 0, 0])
+        assert set(fresh) == {1, 2, 3}
+
+
+def test_empty_source_object_population(raw_root: Path, tmp_path: Path, ffmpeg_path: str) -> None:
+    """
+    Preserve an explicitly empty source annotation instead of inventing geometry records.
+
+    Args:
+        raw_root: Scene whose source annotation will contain no objects.
+        tmp_path: Cache parent.
+        ffmpeg_path: FFmpeg executable.
+    """
+    path = raw_root / "data/scene_a/scans/segments_anno.json"
+    path.write_text(json.dumps({"segGroups": []}))
+    output = prepare_scene(ScanNetPPScene(raw_root, "scene_a"), tmp_path / "empty_objects", ffmpeg=ffmpeg_path)
+
+    with SceneH5(output) as cache:
+        assert cache.objects() == {}
+        assert cache.observation(0).depth[0, 0] == 1000
+
+
+def test_cache_geometry_is_compared_with_source(package_root: Path, raw_root: Path, prepared_cache: Path) -> None:
+    """
+    Explicit source checking detects different boxes even in a cache with a valid geometry checksum.
+
+    Args:
+        package_root: Annotation package with unchanged object IDs and labels.
+        raw_root: Original source boxes.
+        prepared_cache: Cache whose box centre will be changed consistently with its checksum.
+    """
+    path = prepared_cache / "scene_a.h5"
+    with SceneH5(path) as cache:
+        objects = cache.objects()
+    objects[1].centroid[0] += 0.25
+    with h5py.File(path, "r+") as cache:
+        cache["objects/centroid"][0] = objects[1].centroid
+        cache["objects"].attrs["sha256"] = object_geometry_sha256(objects)
+
+    _add_manifest_hashes(package_root)
+    paths = DatasetPaths(package_root, raw_root, prepared_cache)
+    assert check_dataset(paths, scene_ids=["scene_a"], check_cache=True).cache_scenes == 1
+    with pytest.raises(ValueError, match="cached object geometry differs"):
+        check_dataset(paths, scene_ids=["scene_a"], check_cache=True, check_source=True)
+
+
+def test_source_geometry_changes_invalidate_cache(raw_root: Path, prepared_cache: Path, ffmpeg_path: str) -> None:
+    """
+    Reject reuse when source box values change even though the observation files are unchanged.
+
+    Args:
+        raw_root: Source scene to edit after preparation.
+        prepared_cache: Completed cache to preserve.
+        ffmpeg_path: FFmpeg executable.
+    """
+    path = raw_root / "data/scene_a/scans/segments_anno.json"
+    annotation = json.loads(path.read_text())
+    annotation["segGroups"][0]["obb"]["centroid"][0] += 0.25
+    path.write_text(json.dumps(annotation))
+    before = fingerprint_file(prepared_cache / "scene_a.h5")
+
+    with pytest.raises(ValueError, match="source files changed"):
+        prepare_scene(ScanNetPPScene(raw_root, "scene_a"), prepared_cache, ffmpeg=ffmpeg_path)
+    assert fingerprint_file(prepared_cache / "scene_a.h5") == before
+
+
+@pytest.mark.parametrize("change", ["centroid", "label", "duplicate_id", "missing_geometry"])
+def test_invalid_cached_objects_fail(prepared_cache: Path, change: str) -> None:
+    """
+    Reject missing, structurally invalid, or changed object data before it can be used as supervision.
+
+    Args:
+        prepared_cache: Cache to corrupt.
+        change: Object-table change to introduce.
+    """
+    path = prepared_cache / "scene_a.h5"
+    with h5py.File(path, "r+") as cache:
+        if change == "centroid":
+            cache["objects/centroid"][0, 0] += 0.25
+        elif change == "label":
+            cache["objects/label"][0] = "desk"
+        elif change == "duplicate_id":
+            cache["objects/object_id"][1] = 1
+        else:
+            del cache["objects"]
+
+    with pytest.raises((ValueError, KeyError)):
+        SceneH5(path)
+
+
+def test_old_cache_schema_requires_recreation(prepared_cache: Path) -> None:
+    """
+    Fail explicitly on an observation-only cache instead of loading geometry from raw files.
+
+    Args:
+        prepared_cache: Cache to convert to the earlier incomplete schema.
+    """
+    path = prepared_cache / "scene_a.h5"
+    with h5py.File(path, "r+") as cache:
+        cache.attrs["schema_version"] = 1
+        del cache["objects"]
+
+    with pytest.raises(ValueError, match="recreate this cache"):
+        SceneH5(path)
 
 
 def _add_manifest_hashes(root: Path) -> None:

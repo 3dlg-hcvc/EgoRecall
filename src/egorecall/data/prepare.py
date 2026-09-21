@@ -1,5 +1,5 @@
 """
-Prepare canonical observations from original ScanNet++ files into a local HDF5 cache.
+Prepare canonical observations and source object geometry in a local HDF5 scene cache.
 """
 
 import hashlib
@@ -12,8 +12,14 @@ import h5py
 import numpy as np
 
 from egorecall.data.media import encode_depth, extract_video_frames, validate_image
-from egorecall.data.scannetpp import DEPTH_SIZE, ScanNetPPScene, source_frame_index
-from egorecall.data.scene_h5 import CACHE_VERSION, IMAGE_DATASETS, SceneH5
+from egorecall.data.scannetpp import (
+    DEPTH_SIZE,
+    ObjectGeometry,
+    ScanNetPPScene,
+    object_geometry_sha256,
+    source_frame_index,
+)
+from egorecall.data.scene_h5 import CACHE_VERSION, IMAGE_DATASETS, OBJECT_ARRAY_SHAPES, SceneH5
 from scannetpp_common.iphone import iter_depth_frames
 
 
@@ -27,7 +33,7 @@ def prepare_scene(
     ffmpeg: str = "ffmpeg",
 ) -> Path:
     """
-    Prepare the entire canonical scene timeline and reuse only compatible caches.
+    Prepare the full canonical timeline and all source objects, reusing only compatible caches.
     A temporary file is published atomically after validation; interrupted work
     never replaces a completed cache. Source files are read from their original paths.
 
@@ -41,7 +47,7 @@ def prepare_scene(
         ffmpeg: FFmpeg executable name or path.
 
     Returns:
-        Path to the completed or validated existing observation cache.
+        Path to the completed or validated existing scene cache.
     """
     cache_root = cache_root.expanduser().resolve()
     if cache_root.is_relative_to(source.root):
@@ -56,13 +62,22 @@ def prepare_scene(
     if expected_frame_names is not None and names != expected_frame_names:
         raise ValueError(f"{source.scene_id}: source timeline does not match the benchmark frame mapping.")
 
-    # Reuse an existing cache only when its source files, timeline, and cameras match.
-    fingerprints = source.observation_fingerprints()
+    # Retain the complete source-object population, including objects outside query answers.
+    objects = source.objects()
+
+    # Reuse a cache only when source files, timeline, cameras, and object geometry match.
+    fingerprints = source.cache_fingerprints()
     output = cache_root / f"{source.scene_id}.h5"
     if output.exists():
         with SceneH5(output) as cached:
             cached.validate_compatibility(
-                source.scene_id, names, subsample_factor, source_fps, cameras=cameras, source_files=fingerprints
+                source.scene_id,
+                names,
+                subsample_factor,
+                source_fps,
+                cameras=cameras,
+                source_files=fingerprints,
+                objects=objects,
             )
         return output
 
@@ -80,7 +95,7 @@ def prepare_scene(
         )
 
         # Write encoded frames one at a time, retaining native depth values and RGB orientation.
-        temporary_h5 = Path(staging) / "observations.h5"
+        temporary_h5 = Path(staging) / "scene.h5"
         with h5py.File(temporary_h5, "w") as cache:
             cache.attrs.update(
                 format="egorecall-observations",
@@ -102,6 +117,9 @@ def prepare_scene(
             cache.create_dataset("camera/aligned_pose", data=cameras.camera_to_world)
             cache.create_dataset("camera/intrinsic", data=cameras.intrinsics)
             cache.create_dataset("camera/timestamp", data=cameras.timestamps)
+
+            # Store source geometry locally for supervision without reopening the raw download.
+            _write_objects(cache, objects)
 
             # Pack RGB and mask images in canonical frame order.
             for frame_idx, (rgb, mask) in enumerate(zip(rgb_files, mask_files, strict=True)):
@@ -125,10 +143,36 @@ def prepare_scene(
         # Check the finished structure, then publish without overwriting a concurrent result.
         with SceneH5(temporary_h5) as cached:
             cached.validate_compatibility(
-                source.scene_id, names, subsample_factor, source_fps, cameras=cameras, source_files=fingerprints
+                source.scene_id,
+                names,
+                subsample_factor,
+                source_fps,
+                cameras=cameras,
+                source_files=fingerprints,
+                objects=objects,
             )
         os.link(temporary_h5, output)
     return output
+
+
+def _write_objects(cache: h5py.File, objects: dict[int, ObjectGeometry]) -> None:
+    """
+    Store all source object IDs, labels, and boxes with a checksum of their values.
+
+    Args:
+        cache: Writable scene cache.
+        objects: Full source-object population keyed by objectId.
+    """
+    group = cache.create_group("objects")
+    ids = sorted(objects)
+    group.create_dataset("object_id", data=np.array(ids, dtype=np.int64))
+    group.create_dataset("label", data=[objects[oid].label for oid in ids], dtype=h5py.string_dtype("utf-8"))
+
+    # Every geometry column follows the same object-ID order, including empty populations.
+    for name, shape in OBJECT_ARRAY_SHAPES.items():
+        values = np.array([getattr(objects[oid], name) for oid in ids], dtype=np.float64).reshape(len(ids), *shape)
+        group.create_dataset(name, data=values)
+    group.attrs["sha256"] = object_geometry_sha256(objects)
 
 
 def _write_image(cache: h5py.File, frame_idx: int, kind: str, payload: bytes) -> None:
@@ -136,7 +180,7 @@ def _write_image(cache: h5py.File, frame_idx: int, kind: str, payload: bytes) ->
     Store encoded pixels with a checksum for corruption detection on later reads.
 
     Args:
-        cache: Writable observation cache.
+        cache: Writable scene cache.
         frame_idx: Canonical position.
         kind: One of rgb, depth, or mask.
         payload: Complete encoded image.

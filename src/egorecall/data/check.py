@@ -150,6 +150,7 @@ def check_dataset(
         names = annotations.frame_names(scene_id)
         cameras = None
         fingerprints = None
+        source_objects = None
 
         if check_source:
             # Validate source geometry and its object-ID/label join to the annotations.
@@ -157,7 +158,8 @@ def check_dataset(
             for path in (source.paths.scan_mesh_path, source.paths.scan_mesh_segs_path):
                 if not path.is_file():
                     raise FileNotFoundError(f"Missing ScanNet++ geometry: {path}.")
-            join_supervision(source, scene_annotations)
+            source_objects = source.objects()
+            join_supervision(scene_id, source_objects, scene_annotations)
 
             # Match source camera names to the benchmark timeline.
             cameras = source.cameras(metadata["subsample_factor"])
@@ -165,7 +167,7 @@ def check_dataset(
                 raise ValueError(f"{scene_id}: source timeline differs from the benchmark frame mapping.")
 
             if check_cache:
-                fingerprints = source.observation_fingerprints()
+                fingerprints = source.cache_fingerprints()
             source_count += 1
 
         if check_cache:
@@ -177,7 +179,11 @@ def check_dataset(
                     metadata["source_fps"],
                     cameras=cameras,
                     source_files=fingerprints,
+                    objects=source_objects,
                 )
+
+                # Cached geometry must join correctly even when raw-source checks are not requested.
+                join_supervision(scene_id, cached.objects(), scene_annotations)
 
                 # Decode the requested frame coverage only after compatibility checks pass.
                 indices = range(len(names)) if decode_all else sorted({0, len(names) - 1})

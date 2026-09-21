@@ -12,7 +12,7 @@ from types import TracebackType
 from egorecall.config import DatasetPaths
 from egorecall.data.annotations import EgoRecallAnnotations
 from egorecall.data.records import QueryRecord, SceneAnnotations
-from egorecall.data.scannetpp import ObjectGeometry, ScanNetPPScene
+from egorecall.data.scannetpp import ObjectGeometry
 from egorecall.data.scene_h5 import Observation, SceneH5
 from egorecall.data.validation import require_integer
 
@@ -158,28 +158,30 @@ class SceneSupervision:
     filtered_objects: dict[int, ObjectGeometry]
 
 
-def join_supervision(source: ScanNetPPScene, annotations: SceneAnnotations) -> SceneSupervision:
+def join_supervision(
+    scene_id: str, objects: dict[int, ObjectGeometry], annotations: SceneAnnotations
+) -> SceneSupervision:
     """
     Join filtered visibility annotations to the complete source-object population.
     Require matching object IDs and labels; missing objects are data errors.
 
     Args:
-        source: Scene supplying geometry.
+        scene_id: Scene supplying geometry.
+        objects: Full source-object population from a scene cache or raw source reader.
         annotations: Full-scene EgoRecall visibility annotations.
 
     Returns:
         Separate source and filtered object mappings with shared geometry records.
     """
-    if annotations["scene_id"] != source.scene_id:
+    if annotations["scene_id"] != scene_id:
         raise ValueError("Source scene and annotation scene do not match.")
 
-    objects = source.objects()
     filtered: dict[int, ObjectGeometry] = {}
     for key, annotation in annotations["objects"].items():
         oid = int(key)
         obj = objects[oid]
         if obj.label != annotation["label"]:
-            raise ValueError(f"{source.scene_id}/{oid}: source and annotation labels differ.")
+            raise ValueError(f"{scene_id}/{oid}: source and annotation labels differ.")
         filtered[oid] = obj
 
     return SceneSupervision(annotations, objects, filtered)
@@ -187,11 +189,11 @@ def join_supervision(source: ScanNetPPScene, annotations: SceneAnnotations) -> S
 
 class EgoRecallScene:
     """
-    Own one scene's observation cache and load supervision only when requested.
+    Own one scene cache and load its visibility supervision only when requested.
     Pass query() results to methods; answer() and supervision contain ground truth.
 
     Args:
-        paths: Dataset, raw ScanNet++, and local cache locations.
+        paths: Dataset and local cache locations.
         annotations: Query selection containing this scene.
         scene_id: Scene represented by at least one selected query.
     """
@@ -201,7 +203,7 @@ class EgoRecallScene:
         Open and validate a prepared scene against the annotation frame mapping.
 
         Args:
-            paths: Dataset and cache locations, with a raw root for supervision.
+            paths: Dataset and cache locations.
             annotations: Query selection containing this scene.
             scene_id: Selected scene.
         """
@@ -211,7 +213,6 @@ class EgoRecallScene:
 
         self.scene_id = scene_id
         self._annotations = annotations
-        self._paths = paths
 
         # Keep the handle only if the cache matches this scene's annotation timeline.
         self._cache = SceneH5(paths.cache_root / f"{scene_id}.h5")
@@ -252,17 +253,13 @@ class EgoRecallScene:
     @cached_property
     def supervision(self) -> SceneSupervision:
         """
-        Load full-scene visibility and source geometry once for this scene context.
+        Join full-scene visibility with cached source geometry once for this scene context.
         The retained record includes future visibility and must not be passed to methods.
 
         Returns:
             Scene annotations and explicit source/filtered object populations.
         """
-        if self._paths.scannetpp_root is None:
-            raise ValueError("scannetpp_root is required to load source object geometry.")
-
-        source = ScanNetPPScene(self._paths.scannetpp_root, self.scene_id)
-        return join_supervision(source, self._annotations.get_annotations(self.scene_id))
+        return join_supervision(self.scene_id, self._cache.objects(), self._annotations.get_annotations(self.scene_id))
 
     def close(self) -> None:
         """

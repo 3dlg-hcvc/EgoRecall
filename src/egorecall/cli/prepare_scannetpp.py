@@ -1,5 +1,5 @@
 """
-Prepare full canonical scene observations from a local ScanNet++ download.
+Prepare scene observations and object geometry from a local ScanNet++ download.
 """
 
 import argparse
@@ -14,7 +14,7 @@ from egorecall.data.scannetpp import ScanNetPPScene
 
 def main() -> None:
     """
-    Prepare observations with or without an annotation package and report cache paths.
+    Prepare scenes with or without an annotation package and report cache paths.
     """
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--config", type=Path, required=True, help="TOML file containing [paths].")

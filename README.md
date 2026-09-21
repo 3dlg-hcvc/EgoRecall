@@ -158,9 +158,11 @@ scannetpp/v2/
       segments_anno.json
 ```
 
-The scan files supply source geometry and object annotations for generation,
-inspection, and evaluation. Observation preparation reads the iPhone files;
-DSLR assets and COLMAP reconstruction files are not required for this workflow.
+Preparation reads the iPhone files and `scans/segments_anno.json` to cache
+observations and all source object IDs, labels, and boxes. Mesh and segmentation
+files support operations such as visibility rendering; they are not needed to
+read a prepared scene's observations or supervision. DSLR assets and COLMAP
+reconstruction files are not required for preparation.
 Adapted toolkit helpers are documented in
 [scannetpp_common/ATTRIBUTION.md](src/scannetpp_common/ATTRIBUTION.md).
 
@@ -175,9 +177,11 @@ prepare; every selected scene retains its complete canonical timeline. Preparati
 requires the source pose timeline to match the dataset's frame table exactly.
 
 Each scene produces `cache_root/<scene_id>.h5`, containing encoded RGB JPEGs,
-sensor-depth PNGs, anonymization-mask PNGs, camera matrices, timestamps, source
-fingerprints, and encoded-frame checksums. RGB is returned as uint8 **RGB**, in
-native pixel orientation. Depth is uint16 **millimetres**, with zero representing
+sensor-depth PNGs, anonymization-mask PNGs, camera matrices, timestamps, and all
+source object IDs, labels, oriented boxes, and axis-aligned boxes. It also stores
+source-file fingerprints, encoded-frame checksums, and an object-geometry checksum.
+RGB is returned as uint8 **RGB**, in native pixel orientation.
+Depth is uint16 **millimetres**, with zero representing
 invalid depth; depth values are preserved without resizing. Masks retain their
 source grayscale values.
 
@@ -188,11 +192,18 @@ intrinsics scale their first two rows to the 256×192 sensor grid. Use the inver
 of `camera_to_world` when a consumer needs world-to-camera transforms.
 
 Repeated preparation validates the existing cache's scene, timeline, cameras,
-and source-file hashes before reusing it. An incompatible cache raises an error.
+object geometry, and source-file hashes before reusing it. Fingerprints include
+`segments_anno.json`, so changes to source boxes or labels invalidate reuse.
+An incompatible cache raises an error.
 New caches are published atomically; interrupted scenes can be prepared again.
 FFmpeg's temporary image files use the system temporary directory (configurable
 with `TMPDIR`); the temporary H5 is built beside its destination for atomic
 publication. Allow temporary space for one scene's selected images.
+
+Scene caches use schema version 2. Earlier caches without object geometry must
+be recreated in a new cache directory with the current preparation command.
+Normal dataset access uses the EgoRecall annotation package and this prepared
+cache; `scannetpp_root` can be omitted after preparation.
 
 To prepare observations without an EgoRecall annotation package, supply the
 scene IDs and sampling stride:
@@ -240,7 +251,8 @@ with dataset.open_scene(scene_id) as scene:
 `EgoRecallDataset` is the main entry point. Its `annotations` member is an
 `EgoRecallAnnotations` reader, providing query/stage selection and annotation
 access. `open_scene()` returns an `EgoRecallScene` context that owns one prepared
-observation cache and loads source geometry when supervision is requested.
+scene cache. Geometry is read from that cache, and visibility annotations are
+loaded when supervision is requested.
 
 Pass the `QuerySample` to a method. Its query contains only `scene_id`, `query_idx`,
 `description`, and `frame`; its observation window includes frame zero through
@@ -249,19 +261,21 @@ The window can be iterated, or accessed as encoded images with
 `sample.observations.encoded_image(frame_idx, "rgb")`. Keep the scene context open
 while using its windows; closing it closes the HDF5 handle.
 
-`scene.supervision` loads full-scene annotations and geometry on first access and
-retains them for that scene context. `source_objects` contains every ScanNet++
+`scene.supervision` joins full-scene annotations to cached geometry on first
+access and retains them for that scene context. `source_objects` contains every ScanNet++
 object; `filtered_objects` contains the EgoRecall visibility-filtered population,
 joined by `objectId` with matching labels. These are ground truth and include
-information unavailable at query time. Prepared observations can be read without
-a configured raw root; source geometry requires `scannetpp_root`.
+information unavailable at query time. Observations, answers, and supervision
+all work without a configured or accessible raw ScanNet++ directory after preparation.
 
 For direct source access, use `ScanNetPPScene` from `egorecall.data.scannetpp`.
 Its `cameras(subsample_factor=10)` returns the full canonical camera sequence,
 `objects()` returns all source geometry, and `paths` exposes mesh, segmentation,
 annotation, and iPhone filenames. Box axes are stored as rows, and box lengths
 are full side lengths in metres. `SceneH5` from `egorecall.data.scene_h5` provides
-full-timeline cache access for preparation and generation tools.
+full-timeline cache access and an `objects()` method for cached IDs, labels, and
+boxes. Object records returned by `objects()` own their geometry arrays, so
+editing them does not modify later lookups.
 
 The inspection example combines these operations for a chosen stable query key:
 
@@ -289,8 +303,10 @@ egorecall-check --config configs/paths.toml \
 `--scenes` limits source/cache work; the complete annotation package is always
 checked. `--source` validates mesh/segmentation availability, camera alignment,
 and object IDs/labels. Together, `--source --cache` additionally compare source
-fingerprints and camera values against the cache. `--cache` decodes the first and
-last frames by default; `--decode-all` decodes every frame. Each image read checks
+fingerprints, camera values, and all object geometry against the cache.
+`--cache` verifies cached object structure/checksums and joins object IDs and
+labels to the EgoRecall annotations without requiring the raw source. It decodes
+the first and last frames by default; `--decode-all` decodes every frame. Each image read checks
 its encoded checksum. The JSON report states how many files, scenes, queries,
 and frames were checked. Missing files or mismatches produce errors.
 

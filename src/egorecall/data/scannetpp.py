@@ -2,9 +2,12 @@
 Read ScanNet++ camera records and object geometry from a user-supplied download.
 """
 
+from __future__ import annotations
+
+import hashlib
 import json
 import re
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from pathlib import Path
 
 import numpy as np
@@ -61,6 +64,71 @@ class ObjectGeometry:
     lengths: NDArray[np.float64]
     minimum: NDArray[np.float64]
     maximum: NDArray[np.float64]
+
+    def copy(self) -> ObjectGeometry:
+        """
+        Copy the record and its arrays so caller edits leave the original geometry unchanged.
+
+        Returns:
+            An independently owned geometry record.
+        """
+        return replace(
+            self,
+            centroid=self.centroid.copy(),
+            axes=self.axes.copy(),
+            lengths=self.lengths.copy(),
+            minimum=self.minimum.copy(),
+            maximum=self.maximum.copy(),
+        )
+
+
+def validate_object_geometry(obj: ObjectGeometry, context: str) -> None:
+    """
+    Check an object's box shapes, finite values, extents, and orthonormal axes.
+
+    Args:
+        obj: Object geometry from a source annotation or scene cache.
+        context: Scene/object description used in errors.
+    """
+    for vector in (obj.centroid, obj.lengths, obj.minimum, obj.maximum):
+        if vector.shape != (3,) or not np.isfinite(vector).all():
+            raise ValueError(f"{context}: invalid bounding-box vectors.")
+
+    if np.any(obj.lengths < 0) or np.any(obj.maximum < obj.minimum):
+        raise ValueError(f"{context}: invalid bounding-box extents.")
+
+    if (
+        obj.axes.shape != (3, 3)
+        or not np.isfinite(obj.axes).all()
+        or not np.allclose(obj.axes @ obj.axes.T, np.eye(3), atol=1e-4)
+    ):
+        raise ValueError(f"{context}: box axes must be orthonormal rows.")
+
+
+def object_geometry_sha256(objects: dict[int, ObjectGeometry]) -> str:
+    """
+    Fingerprint object IDs, labels, and box values in a deterministic representation.
+
+    Args:
+        objects: Validated source geometry keyed by object ID.
+
+    Returns:
+        SHA-256 of UTF-8 JSON with sorted IDs/keys, compact separators, and finite numbers.
+    """
+    records = [
+        {
+            "object_id": oid,
+            "label": obj.label,
+            "centroid": obj.centroid.tolist(),
+            "axes": obj.axes.tolist(),
+            "lengths": obj.lengths.tolist(),
+            "minimum": obj.minimum.tolist(),
+            "maximum": obj.maximum.tolist(),
+        }
+        for oid, obj in sorted(objects.items())
+    ]
+    encoded = json.dumps(records, ensure_ascii=False, sort_keys=True, separators=(",", ":"), allow_nan=False)
+    return hashlib.sha256(encoded.encode("utf-8")).hexdigest()
 
 
 def source_frame_index(name: str) -> int:
@@ -223,21 +291,18 @@ class ScanNetPPScene:
         objects: dict[int, ObjectGeometry] = {}
         for oid, record in load_annotation(self.paths.scan_anno_json_path).items():
             box = record["obb"]
-
-            vectors = [np.array(box[field], dtype=np.float64) for field in ("centroid", "axesLengths", "min", "max")]
-            if any(vector.shape != (3,) or not np.isfinite(vector).all() for vector in vectors):
-                raise ValueError(f"{self.scene_id}/{oid}: invalid bounding-box vectors.")
-
-            centroid, lengths, minimum, maximum = vectors
-            if np.any(lengths < 0) or np.any(maximum < minimum):
-                raise ValueError(f"{self.scene_id}/{oid}: invalid bounding-box extents.")
-
-            axes = np.array(box["normalizedAxes"], dtype=np.float64).reshape(3, 3)
-            if not np.isfinite(axes).all() or not np.allclose(axes @ axes.T, np.eye(3), atol=1e-4):
-                raise ValueError(f"{self.scene_id}/{oid}: box axes must be orthonormal rows.")
-
             label = require_text(record["label"], f"{self.scene_id}/{oid}/label")
-            objects[oid] = ObjectGeometry(oid, label, centroid, axes, lengths, minimum, maximum)
+            obj = ObjectGeometry(
+                object_id=oid,
+                label=label,
+                centroid=np.array(box["centroid"], dtype=np.float64),
+                axes=np.array(box["normalizedAxes"], dtype=np.float64).reshape(3, 3),
+                lengths=np.array(box["axesLengths"], dtype=np.float64),
+                minimum=np.array(box["min"], dtype=np.float64),
+                maximum=np.array(box["max"], dtype=np.float64),
+            )
+            validate_object_geometry(obj, f"{self.scene_id}/{oid}")
+            objects[oid] = obj
         return objects
 
     def metadata_path(self, name: str) -> Path:
@@ -255,9 +320,9 @@ class ScanNetPPScene:
             raise FileNotFoundError(f"Missing ScanNet++ metadata: {path}.")
         return path
 
-    def observation_sources(self) -> dict[str, Path]:
+    def cache_sources(self) -> dict[str, Path]:
         """
-        Identify every source file needed to prepare RGB, depth, masks, and cameras.
+        Identify source files for observations, cameras, and object geometry in the scene cache.
 
         Returns:
             Paths keyed by filenames relative to the scene directory.
@@ -270,14 +335,15 @@ class ScanNetPPScene:
                 self.paths.iphone_video_path,
                 self.paths.iphone_video_mask_path,
                 self.paths.iphone_depth_path,
+                self.paths.scan_anno_json_path,
             )
         }
 
-    def observation_fingerprints(self) -> dict[str, FileFingerprint]:
+    def cache_fingerprints(self) -> dict[str, FileFingerprint]:
         """
-        Hash observation sources to detect changes before reusing a prepared cache.
+        Hash scene-cache sources to detect changes before reusing prepared data.
 
         Returns:
             Source byte counts and SHA-256 digests, without machine-specific paths.
         """
-        return {name: fingerprint_file(path) for name, path in self.observation_sources().items()}
+        return {name: fingerprint_file(path) for name, path in self.cache_sources().items()}
