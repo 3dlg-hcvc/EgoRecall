@@ -78,11 +78,11 @@ def test_local_annotations_and_frames_match(local_annotations: EgoRecallAnnotati
     """
     annotations = local_annotations
     for scene_id in annotations.scene_ids:
-        scene = annotations.get_scene(scene_id)
-        with gzip.open(annotations.root / scene["annotations"], "rt", encoding="utf-8") as stream:
+        scene_record = annotations.get_scene(scene_id)
+        with gzip.open(annotations.root / scene_record["annotations"], "rt", encoding="utf-8") as stream:
             expected = json.load(stream)
         assert annotations.get_annotations(scene_id) == expected
-        assert len(expected["objects"]) == scene["num_objects"]
+        assert len(expected["objects"]) == scene_record["num_objects"]
 
     frames = pq.read_table(annotations.root / "frames" / f"{annotations.split}.parquet").to_pylist()
     for row in frames:

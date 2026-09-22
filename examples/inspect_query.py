@@ -27,8 +27,8 @@ def main() -> None:
     dataset = EgoRecallDataset(DatasetPaths.from_toml(args.config), split=args.split, stages=args.stages)
 
     # The model-facing sample contains only query text/time and the bounded history.
-    with dataset.open_scene(args.scene) as scene:
-        sample = scene.query(args.query)
+    with dataset.open_scene(args.scene) as scene_data:
+        sample = scene_data.query(args.query)
         frame = sample.observations.frame(sample.query.frame)
 
         report = {
@@ -43,11 +43,11 @@ def main() -> None:
 
         # Ground truth is requested separately for inspection or evaluation.
         if args.supervision:
-            truth = scene.supervision
+            scene_supervision = scene_data.supervision
             report["supervision"] = {
-                "target_oids": scene.answer(args.query)["target_oids"],
-                "source_objects": len(truth.source_objects),
-                "filtered_objects": len(truth.filtered_objects),
+                "target_oids": scene_data.answer(args.query)["target_oids"],
+                "source_objects": len(scene_supervision.source_objects),
+                "filtered_objects": len(scene_supervision.filtered_objects),
             }
 
         print(json.dumps(report, indent=2))

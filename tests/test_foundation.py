@@ -15,13 +15,15 @@ import pytest
 
 from egorecall import DatasetPaths
 from egorecall.cli import prepare_scannetpp
-from egorecall.data import EgoRecallAnnotations, EgoRecallDataset
-from egorecall.data.check import check_dataset, verify_package
+from egorecall.data import EgoRecallDataset
+from egorecall.data.check import check_dataset, check_source_scenes, verify_package
 from egorecall.data.integrity import fingerprint_file
 from egorecall.data.media import decode_image, extract_video_frames
 from egorecall.data.prepare import prepare_scene
 from egorecall.data.scannetpp import ScanNetPPScene, object_geometry_sha256, scale_intrinsics
 from egorecall.data.scene_h5 import CACHE_VERSION, SceneH5
+from egorecall.data.validate_cache import validate_scene_cache
+from egorecall.data.validate_sources import validate_source_scene
 from scannetpp_common.iphone import iter_depth_frames
 
 
@@ -39,12 +41,10 @@ def prepared_cache(raw_root: Path, package_root: Path, tmp_path: Path, ffmpeg_pa
     Returns:
         Cache directory containing scene_a.h5.
     """
-    annotations = EgoRecallAnnotations(package_root)
     root = tmp_path / "cache"
     prepare_scene(
         ScanNetPPScene(raw_root, "scene_a"),
         root,
-        expected_frame_names=annotations.frame_names("scene_a"),
         ffmpeg=ffmpeg_path,
     )
     return root
@@ -57,8 +57,8 @@ def test_raw_geometry_and_camera_conventions(raw_root: Path) -> None:
     Args:
         raw_root: Scene with known source boxes and cameras.
     """
-    source = ScanNetPPScene(raw_root, "scene_a")
-    cameras = source.cameras()
+    source_scene = ScanNetPPScene(raw_root, "scene_a")
+    cameras = source_scene.cameras()
     assert cameras.frame_names == ("frame_000000", "frame_000010", "frame_000020")
     np.testing.assert_array_equal(cameras.camera_to_world[:, 0, 3], [0, 0.1, 0.2])
     np.testing.assert_allclose(cameras.timestamps, 100 + np.array([0, 10, 20]) / 60)
@@ -68,14 +68,14 @@ def test_raw_geometry_and_camera_conventions(raw_root: Path) -> None:
     np.testing.assert_array_equal(scaled[0], [[160, 0, 128], [0, 160, 96], [0, 0, 1]])
     np.testing.assert_array_equal(cameras.intrinsics, original)
 
-    objects = source.objects()
+    objects = source_scene.objects()
     assert set(objects) == {1, 2, 3}
     np.testing.assert_array_equal(objects[2].lengths, [1, 2, 3])
     assert objects[3].label == "lamp"
 
-    assert source.metadata_path("semantic_classes.txt").is_file()
-    assert source.paths.scan_mesh_path.is_file()
-    assert source.paths.scan_mesh_segs_path.is_file()
+    assert source_scene.metadata_path("semantic_classes.txt").is_file()
+    assert source_scene.paths.scan_mesh_path.is_file()
+    assert source_scene.paths.scan_mesh_segs_path.is_file()
 
 
 @pytest.mark.parametrize("scene_id", ["../scene_a", "/scene_a", "missing"])
@@ -88,9 +88,9 @@ def test_raw_scene_paths_fail(raw_root: Path, scene_id: str) -> None:
         scene_id: Invalid or unavailable scene identifier.
     """
     with pytest.raises((ValueError, FileNotFoundError)):
-        ScanNetPPScene(raw_root, scene_id)
-    with pytest.raises(FileNotFoundError, match="must contain data/"):
-        ScanNetPPScene(raw_root / "data", "scene_a")
+        validate_source_scene(ScanNetPPScene(raw_root, scene_id), 10)
+    with pytest.raises(FileNotFoundError):
+        validate_source_scene(ScanNetPPScene(raw_root / "data", "scene_a"), 10)
 
 
 def test_annotation_operations_require_dataset_root() -> None:
@@ -155,11 +155,11 @@ def test_preparation_without_annotations_needs_only_cache_inputs(
         assert set(cache.objects()) == {1, 2, 3}
 
     # Metadata is required only when a caller requests a particular metadata file.
-    source = ScanNetPPScene(raw_root, "scene_a")
-    with pytest.raises(FileNotFoundError, match=r"Missing ScanNet\+\+ metadata"):
-        source.metadata_path("semantic_classes.txt")
+    source_scene = ScanNetPPScene(raw_root, "scene_a")
+    with pytest.raises(FileNotFoundError):
+        source_scene.metadata_path("semantic_classes.txt").read_text()
     saved_metadata.rename(metadata)
-    assert source.metadata_path("semantic_classes.txt") == metadata / "semantic_classes.txt"
+    assert source_scene.metadata_path("semantic_classes.txt") == metadata / "semantic_classes.txt"
 
     # The annotation-based CLI still requires an annotation root.
     monkeypatch.setattr(sys, "argv", ["egorecall-prepare", "--config", str(config), "--split", "test"])
@@ -254,18 +254,18 @@ def test_camera_access_is_independent_of_images(
             getattr(camera, name)[:] = 999
             np.testing.assert_array_equal(getattr(cache.camera(1), name), getattr(expected, name))
 
-        for invalid in (-1, True, 1.0, 3):
-            with pytest.raises((ValueError, IndexError)):
+        for invalid in (-4, 1.0, 3):
+            with pytest.raises((TypeError, IndexError)):
                 cache.camera(invalid)
 
-    with EgoRecallDataset(DatasetPaths(package_root, cache_root=prepared_cache)).open_scene("scene_a") as scene:
-        window = scene.query(17).observations
+    with EgoRecallDataset(DatasetPaths(package_root, cache_root=prepared_cache)).open_scene("scene_a") as scene_data:
+        window = scene_data.query(17).observations
         camera = window.camera(1)
         np.testing.assert_array_equal(camera.camera_to_world, expected.camera_to_world)
         assert camera.frame_name == "frame_000010"
 
-        for invalid in (-1, True, 1.0, 2, 100):
-            with pytest.raises((ValueError, IndexError)):
+        for invalid in (-3, 1.0, 2, 100):
+            with pytest.raises((TypeError, IndexError)):
                 window.camera(invalid)
 
 
@@ -382,8 +382,8 @@ def test_query_cutoff_and_separate_supervision(package_root: Path, raw_root: Pat
         prepared_cache: Full three-frame observation cache.
     """
     dataset = EgoRecallDataset(DatasetPaths(package_root, raw_root, prepared_cache))
-    with dataset.open_scene("scene_a") as scene:
-        sample = scene.query(17)
+    with dataset.open_scene("scene_a") as scene_data:
+        sample = scene_data.query(17)
         assert set(asdict(sample.query)) == {"scene_id", "query_idx", "description", "frame"}
         assert sample.query.frame == 1
 
@@ -391,16 +391,16 @@ def test_query_cutoff_and_separate_supervision(package_root: Path, raw_root: Pat
         assert [frame.frame_idx for frame in sample.observations] == [0, 1]
         assert sample.observations.frame(1).frame_name == "frame_000010"
 
-        for invalid in (-1, True, 1.0, 2, 100):
-            with pytest.raises((ValueError, IndexError)):
+        for invalid in (-3, 1.0, 2, 100):
+            with pytest.raises((TypeError, IndexError)):
                 sample.observations.frame(invalid)
-            with pytest.raises((ValueError, IndexError)):
+            with pytest.raises((TypeError, IndexError)):
                 sample.observations.encoded_image(invalid)
 
-        assert scene.answer(17)["target_oids"] == [1]
-        assert set(scene.supervision.source_objects) == {1, 2, 3}
-        assert set(scene.supervision.filtered_objects) == {1, 2}
-        assert scene.supervision.annotations["num_frames"] == 3
+        assert scene_data.answer(17)["target_oids"] == [1]
+        assert set(scene_data.supervision.source_objects) == {1, 2, 3}
+        assert set(scene_data.supervision.filtered_objects) == {1, 2}
+        assert scene_data.supervision.annotations["num_frames"] == 3
 
     with pytest.raises((ValueError, KeyError)):
         sample.observations.frame(0)
@@ -408,24 +408,23 @@ def test_query_cutoff_and_separate_supervision(package_root: Path, raw_root: Pat
 
 def test_stale_source_and_wrong_timeline_fail(raw_root: Path, prepared_cache: Path, ffmpeg_path: str) -> None:
     """
-    Reject incompatible cache reuse without changing the existing completed file.
+    The source/cache checker detects changed inputs; preparation leaves existing files untouched.
 
     Args:
         raw_root: Source scene to change after preparation.
         prepared_cache: Completed cache to preserve.
         ffmpeg_path: FFmpeg executable.
     """
-    source = ScanNetPPScene(raw_root, "scene_a")
+    source_scene = ScanNetPPScene(raw_root, "scene_a")
     before = fingerprint_file(prepared_cache / "scene_a.h5")
+    paths = DatasetPaths(scannetpp_root=raw_root, cache_root=prepared_cache)
     with pytest.raises(ValueError, match="timeline"):
-        prepare_scene(source, prepared_cache, subsample_factor=5, ffmpeg=ffmpeg_path)
-    with pytest.raises(ValueError, match="frame mapping"):
-        prepare_scene(source, prepared_cache, expected_frame_names=("frame_000000",), ffmpeg=ffmpeg_path)
+        check_source_scenes(paths, ["scene_a"], 5, check_cache=True)
 
-    exif = source.paths.iphone_exif_path
+    exif = source_scene.paths.iphone_exif_path
     exif.write_text(exif.read_text() + "\n")
     with pytest.raises(ValueError, match="source files changed"):
-        prepare_scene(source, prepared_cache, ffmpeg=ffmpeg_path)
+        check_source_scenes(paths, ["scene_a"], 10, check_cache=True)
     assert fingerprint_file(prepared_cache / "scene_a.h5") == before
 
 
@@ -438,23 +437,23 @@ def test_failed_preparation_leaves_no_completed_cache(raw_root: Path, tmp_path: 
         tmp_path: Cache parent.
         ffmpeg_path: FFmpeg executable.
     """
-    source = ScanNetPPScene(raw_root, "scene_a")
-    depth = source.paths.iphone_depth_path.read_bytes()
+    source_scene = ScanNetPPScene(raw_root, "scene_a")
+    depth = source_scene.paths.iphone_depth_path.read_bytes()
     first_size = int.from_bytes(depth[:4], "little")
-    source.paths.iphone_depth_path.write_bytes(depth[: 4 + first_size])
+    source_scene.paths.iphone_depth_path.write_bytes(depth[: 4 + first_size])
 
     root = tmp_path / "failed_cache"
     with pytest.raises(ValueError, match="depth is missing"):
-        prepare_scene(source, root, ffmpeg=ffmpeg_path)
+        prepare_scene(source_scene, root, ffmpeg=ffmpeg_path)
     assert not list(root.iterdir())
 
     with pytest.raises(ValueError, match="outside the ScanNet"):
-        prepare_scene(source, raw_root / "cache", ffmpeg=ffmpeg_path)
+        prepare_scene(source_scene, raw_root / "cache", ffmpeg=ffmpeg_path)
 
 
 def test_corrupt_cached_payload_fails(prepared_cache: Path) -> None:
     """
-    Detect changed encoded pixels before returning an observation.
+    Detect changed encoded pixels in the standalone checker, including an interior frame not selected for full decoding.
 
     Args:
         prepared_cache: Completed cache whose second RGB payload will be replaced.
@@ -463,8 +462,8 @@ def test_corrupt_cached_payload_fails(prepared_cache: Path) -> None:
     with h5py.File(path, "r+") as cache:
         cache["frames/rgb_jpg"][1] = cache["frames/rgb_jpg"][0]
 
-    with SceneH5(path) as cache, pytest.raises(ValueError, match="checksum mismatch"):
-        cache.observation(1)
+    with pytest.raises(ValueError, match="checksum mismatch"):
+        validate_scene_cache(path)
 
 
 @pytest.mark.parametrize(
@@ -491,7 +490,7 @@ def test_invalid_cache_metadata_fails(prepared_cache: Path, attribute: str, valu
         cache.attrs[attribute] = value
 
     with pytest.raises(ValueError):
-        SceneH5(path)
+        validate_scene_cache(path)
 
 
 @pytest.mark.parametrize("indices", [(7,), (1, 4, 20)])
@@ -511,11 +510,76 @@ def test_video_selection_uses_source_indices(
     names = tuple(f"frame_{index:06d}" for index in indices)
     files = extract_video_frames(video, names, tmp_path / "selected", ffmpeg=ffmpeg_path)
     for index, path in zip(indices, files, strict=True):
-        rgb = decode_image(path.read_bytes(), "rgb", (32, 24))
+        rgb = decode_image(path.read_bytes(), "rgb")
         np.testing.assert_allclose(rgb[2, 2], [200, 20 + index, 30], atol=5)
 
     with pytest.raises(ValueError, match="extracted 1 frames, expected 2"):
         extract_video_frames(video, ("frame_000000", "frame_000100"), tmp_path / "missing", ffmpeg=ffmpeg_path)
+
+
+@pytest.mark.parametrize("indices", [(), (10, 0), (0, 0)])
+def test_video_selection_rejected_before_extraction(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, indices: tuple[int, ...]
+) -> None:
+    """
+    Reject selections that cannot produce one output per requested frame in the requested order.
+
+    Args:
+        tmp_path: Directory for the proposed extraction destination.
+        monkeypatch: Fixture that makes any FFmpeg invocation fail the test.
+        indices: Empty, descending, or repeated source indices.
+    """
+    from egorecall.data import media
+
+    def unexpected_ffmpeg(*args: object, **kwargs: object) -> None:
+        """
+        Fail if an invalid extraction request reaches FFmpeg.
+
+        Args:
+            args: Subprocess positional arguments.
+            kwargs: Subprocess keyword arguments.
+        """
+        pytest.fail("Invalid selection reached FFmpeg.")
+
+    monkeypatch.setattr(media.subprocess, "run", unexpected_ffmpeg)
+    frame_names = tuple(f"frame_{index:06d}" for index in indices)
+    destination = tmp_path / "extracted"
+    with pytest.raises(ValueError, match="nonempty, increasing"):
+        extract_video_frames(tmp_path / "video.mkv", frame_names, destination)
+    assert not destination.exists()
+
+
+@pytest.mark.parametrize("filename", ["seq_000000.jpg", "notes.txt"])
+def test_video_extraction_preserves_nonempty_destination(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, filename: str
+) -> None:
+    """
+    Reject an occupied destination before FFmpeg can overwrite or mix in existing files.
+
+    Args:
+        tmp_path: Existing extraction directory.
+        monkeypatch: Fixture that makes any FFmpeg invocation fail the test.
+        filename: Existing output image or unrelated file to preserve.
+    """
+    from egorecall.data import media
+
+    def unexpected_ffmpeg(*args: object, **kwargs: object) -> None:
+        """
+        Fail if an occupied destination reaches FFmpeg.
+
+        Args:
+            args: Subprocess positional arguments.
+            kwargs: Subprocess keyword arguments.
+        """
+        pytest.fail("Nonempty destination reached FFmpeg.")
+
+    monkeypatch.setattr(media.subprocess, "run", unexpected_ffmpeg)
+    existing_file = tmp_path / filename
+    existing_file.write_bytes(b"existing contents")
+    with pytest.raises(ValueError, match="must be empty"):
+        extract_video_frames(tmp_path / "video.mkv", ("frame_000000",), tmp_path)
+    assert existing_file.read_bytes() == b"existing contents"
+    assert list(tmp_path.iterdir()) == [existing_file]
 
 
 @pytest.mark.parametrize("change", ["missing", "label"])
@@ -533,19 +597,15 @@ def test_source_object_join_fails(
         change: Remove a required object or change its label.
     """
     path = raw_root / "data/scene_a/scans/segments_anno.json"
-    source = json.loads(path.read_text())
+    source_annotation = json.loads(path.read_text())
     if change == "missing":
-        source["segGroups"] = source["segGroups"][1:]
+        source_annotation["segGroups"] = source_annotation["segGroups"][1:]
     else:
-        source["segGroups"][0]["label"] = "desk"
-    path.write_text(json.dumps(source))
+        source_annotation["segGroups"][0]["label"] = "desk"
+    path.write_text(json.dumps(source_annotation))
 
     cache_root = tmp_path / "changed_objects_cache"
     prepare_scene(ScanNetPPScene(raw_root, "scene_a"), cache_root, ffmpeg=ffmpeg_path)
-    dataset = EgoRecallDataset(DatasetPaths(package_root, cache_root=cache_root))
-    with dataset.open_scene("scene_a") as scene, pytest.raises((KeyError, ValueError)):
-        scene.supervision
-
     _add_manifest_hashes(package_root)
     with pytest.raises((KeyError, ValueError)):
         check_dataset(DatasetPaths(package_root, cache_root=cache_root), scene_ids=["scene_a"], check_cache=True)
@@ -561,19 +621,19 @@ def test_observations_and_supervision_without_raw_source(package_root: Path, pre
     """
     dataset = EgoRecallDataset(DatasetPaths(package_root, cache_root=prepared_cache), stages=1)
     scene_id, query_idx = dataset.annotations.query_keys[0]
-    with dataset.open_scene(scene_id) as scene:
-        sample = scene.query(query_idx)
+    with dataset.open_scene(scene_id) as scene_data:
+        sample = scene_data.query(query_idx)
         assert len(sample.observations) == 1
         assert sample.observations.frame(0).depth[0, 0] == 1000
         with pytest.raises(AttributeError):
             sample.observations.frame_names = ("frame_000000", "frame_000010")
-        assert scene.answer(query_idx)["target_oids"] == [1]
-        assert set(scene.supervision.source_objects) == {1, 2, 3}
-        assert set(scene.supervision.filtered_objects) == {1, 2}
-        assert scene.supervision.source_objects[3].label == "lamp"
+        assert scene_data.answer(query_idx)["target_oids"] == [1]
+        assert set(scene_data.supervision.source_objects) == {1, 2, 3}
+        assert set(scene_data.supervision.filtered_objects) == {1, 2}
+        assert scene_data.supervision.source_objects[3].label == "lamp"
         with pytest.raises(KeyError):
-            scene.query(17)
-    with pytest.raises(KeyError):
+            scene_data.query(17)
+    with pytest.raises(FileNotFoundError):
         dataset.open_scene("scene_b")
 
 
@@ -592,11 +652,11 @@ def test_cached_geometry_survives_unavailable_raw_source(
     paths = DatasetPaths(package_root, raw_root, prepared_cache)
     raw_root.rename(raw_root.with_name("disconnected_source"))
 
-    with EgoRecallDataset(paths).open_scene("scene_a") as scene:
-        assert scene.query(17).observations.frame(1).frame_name == "frame_000010"
-        assert set(scene.supervision.source_objects) == set(source_objects)
+    with EgoRecallDataset(paths).open_scene("scene_a") as scene_data:
+        assert scene_data.query(17).observations.frame(1).frame_name == "frame_000010"
+        assert set(scene_data.supervision.source_objects) == set(source_objects)
         for oid, expected in source_objects.items():
-            actual = scene.supervision.source_objects[oid]
+            actual = scene_data.supervision.source_objects[oid]
             assert actual.label == expected.label
             for name in ("centroid", "axes", "lengths", "minimum", "maximum"):
                 np.testing.assert_array_equal(getattr(actual, name), getattr(expected, name))
@@ -674,20 +734,22 @@ def test_source_geometry_changes_invalidate_cache(raw_root: Path, prepared_cache
         ffmpeg_path: FFmpeg executable.
     """
     path = raw_root / "data/scene_a/scans/segments_anno.json"
-    annotation = json.loads(path.read_text())
-    annotation["segGroups"][0]["obb"]["centroid"][0] += 0.25
-    path.write_text(json.dumps(annotation))
+    scene_annotations = json.loads(path.read_text())
+    scene_annotations["segGroups"][0]["obb"]["centroid"][0] += 0.25
+    path.write_text(json.dumps(scene_annotations))
     before = fingerprint_file(prepared_cache / "scene_a.h5")
 
     with pytest.raises(ValueError, match="source files changed"):
-        prepare_scene(ScanNetPPScene(raw_root, "scene_a"), prepared_cache, ffmpeg=ffmpeg_path)
+        check_source_scenes(
+            DatasetPaths(scannetpp_root=raw_root, cache_root=prepared_cache), ["scene_a"], 10, check_cache=True
+        )
     assert fingerprint_file(prepared_cache / "scene_a.h5") == before
 
 
 @pytest.mark.parametrize("change", ["centroid", "label", "duplicate_id", "missing_geometry"])
 def test_invalid_cached_objects_fail(prepared_cache: Path, change: str) -> None:
     """
-    Reject missing, structurally invalid, or changed object data before it can be used as supervision.
+    Reject missing, structurally invalid, or changed object data during the explicit cache check.
 
     Args:
         prepared_cache: Cache to corrupt.
@@ -705,7 +767,7 @@ def test_invalid_cached_objects_fail(prepared_cache: Path, change: str) -> None:
             del cache["objects"]
 
     with pytest.raises((ValueError, KeyError)):
-        SceneH5(path)
+        validate_scene_cache(path)
 
 
 def test_old_cache_schema_requires_recreation(prepared_cache: Path) -> None:
@@ -721,7 +783,7 @@ def test_old_cache_schema_requires_recreation(prepared_cache: Path) -> None:
         del cache["objects"]
 
     with pytest.raises(ValueError, match="recreate this cache"):
-        SceneH5(path)
+        validate_scene_cache(path)
 
 
 def _add_manifest_hashes(root: Path) -> None:
@@ -796,3 +858,114 @@ def test_checker_annotation_counts_fail(package_root: Path, name: str) -> None:
 
     with pytest.raises(ValueError, match=f"manifest/counts/{name}"):
         check_dataset(DatasetPaths(package_root))
+
+
+def test_cache_reads_skip_checksum_audits(prepared_cache: Path) -> None:
+    """
+    Ordinary image access leaves checksum auditing to the explicit checker.
+
+    Args:
+        prepared_cache: Cache whose image bytes will stay unchanged.
+    """
+    path = prepared_cache / "scene_a.h5"
+    with h5py.File(path, "r+") as h5_file:
+        h5_file["frames/rgb_jpg_sha256"][1] = b"0" * 64
+    with SceneH5(path) as scene_h5:
+        assert scene_h5.observation(1).depth[0, 0] == 1010
+    with pytest.raises(ValueError, match="checksum mismatch"):
+        validate_scene_cache(path)
+
+
+def test_negative_window_indices_stay_before_query(package_root: Path, prepared_cache: Path) -> None:
+    """
+    Negative indices count from the query frame, never from the end of the full cache.
+
+    Args:
+        package_root: Queries with a cutoff before the last cached frame.
+        prepared_cache: Three-frame scene cache.
+    """
+    dataset = EgoRecallDataset(DatasetPaths(package_root, cache_root=prepared_cache))
+    with dataset.open_scene("scene_a") as scene_data:
+        observation_window = scene_data.query(17).observations
+        assert observation_window.frame(-1).frame_idx == 1
+        assert observation_window.camera(-1).frame_idx == 1
+        assert observation_window.encoded_image(-1) == observation_window.encoded_image(1)
+        assert observation_window.frame(-2).frame_idx == 0
+        for accessor in (observation_window.frame, observation_window.camera, observation_window.encoded_image):
+            with pytest.raises(IndexError):
+                accessor(-3)
+            with pytest.raises(IndexError):
+                accessor(2)
+
+
+def test_source_checker_without_annotation_package(
+    raw_root: Path,
+    prepared_cache: Path,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """
+    Validate source inputs and a prepared cache through the CLI without any dataset_root.
+
+    Args:
+        raw_root: Synthetic ScanNet++ source.
+        prepared_cache: Matching scene cache.
+        tmp_path: Directory for the configuration file.
+        monkeypatch: Fixture supplying command-line arguments.
+        capsys: Fixture capturing the JSON report.
+    """
+    from egorecall.cli.check_dataset import main
+
+    config = tmp_path / "source_only.toml"
+    config.write_text(f"""[paths]
+scannetpp_root = "{raw_root}"
+cache_root = "{prepared_cache}"
+""")
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        [
+            "egorecall-check",
+            "--config",
+            str(config),
+            "--without-annotations",
+            "--scenes",
+            "scene_a",
+            "--subsample-factor",
+            "10",
+            "--cache",
+            "--decode-all",
+        ],
+    )
+    main()
+    report = json.loads(capsys.readouterr().out)
+    assert report == dict(
+        files_verified=0, queries_checked=0, annotation_scenes=0, source_scenes=1, cache_scenes=1, frames_decoded=3
+    )
+
+
+def test_preparation_uses_supplied_frame_names(raw_root: Path, tmp_path: Path, ffmpeg_path: str) -> None:
+    """
+    Supplied frame names select the same source positions for cameras, RGB, and depth.
+
+    Args:
+        raw_root: Source frames with timestamps and depth values encoding their position.
+        tmp_path: Cache destination parent.
+        ffmpeg_path: FFmpeg executable.
+    """
+    frame_names = ("frame_000001", "frame_000011")
+    cache_path = prepare_scene(
+        ScanNetPPScene(raw_root, "scene_a"),
+        tmp_path / "selected_cache",
+        frame_names=frame_names,
+        ffmpeg=ffmpeg_path,
+    )
+    validate_scene_cache(cache_path, decode_all=True)
+    with SceneH5(cache_path) as scene_h5:
+        assert scene_h5.frame_names == frame_names
+        for frame_idx, source_idx in enumerate((1, 11)):
+            observation = scene_h5.observation(frame_idx)
+            assert observation.depth[0, 0] == 1000 + source_idx
+            np.testing.assert_allclose(observation.camera_to_world[0, 3], source_idx / 100)
+            np.testing.assert_allclose(observation.rgb[2, 2], [200, 20 + source_idx, 30], atol=5)

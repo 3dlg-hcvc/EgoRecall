@@ -98,20 +98,20 @@ def encode_depth(depth: NDArray[np.uint16]) -> bytes:
         return buffer.getvalue()
 
 
-def decode_image(payload: bytes, kind: str, size: tuple[int, int]) -> NDArray[np.uint8] | NDArray[np.uint16]:
+def decode_image(payload: bytes, kind: str) -> NDArray[np.uint8] | NDArray[np.uint16]:
     """
-    Decode an image and validate its pixel dimensions and channel representation.
+    Decode an image into an array, retaining uint16 depth values and uint8 RGB or masks.
 
     Args:
         payload: Encoded JPEG or PNG bytes.
         kind: One of rgb, depth, or mask.
-        size: Expected (width, height).
 
     Returns:
         RGB uint8 (H, W, 3), mask uint8 (H, W), or depth uint16 (H, W).
     """
+    if kind not in ("rgb", "mask", "depth"):
+        raise ValueError(f"Unknown image kind {kind!r}.")
     with Image.open(BytesIO(payload)) as image:
-        _validate_image_header(image, kind, size)
         return np.array(image, dtype=np.uint16 if kind == "depth" else np.uint8)
 
 

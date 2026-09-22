@@ -15,7 +15,7 @@ type Program = list[str | int | Program]
 class QueryRecord(TypedDict):
     """
     A query, its DSL program, and ground-truth target IDs. query_idx is a stable identifier
-    within scene_id; frame is its zero-based canonical query time. The three
+    within scene_id; frame is its zero-based sampled frame number. The three
     target lists contain object IDs, and program_json stores the nested DSL.
     """
 
@@ -77,7 +77,7 @@ class TemporalSummary(TypedDict):
 class ObjectAnnotation(TypedDict):
     """
     Full visibility history for an object. Segment endpoints are inclusive;
-    per_frame uses canonical frame indices encoded as JSON string keys.
+    per_frame uses sampled frame indices encoded as JSON string keys.
     """
 
     label: str
@@ -90,7 +90,7 @@ class SceneAnnotations(TypedDict):
     """
     Full-scene visibility annotations for all objects retained by the visibility
     filter, including objects not targeted by selected queries. objects is keyed
-    by string object IDs. Image and geometry data are stored separately in ScanNet++.
+    by string object IDs. Images and object boxes are stored separately in the prepared H5 cache.
     """
 
     schema_version: int
@@ -103,8 +103,7 @@ class SceneAnnotations(TypedDict):
 
 def decode_program(program_json: str) -> Program:
     """
-    Decode program_json into nested DSL arrays. Check array structure and value
-    types; operator names and query semantics are not evaluated.
+    Decode program_json into nested lists of operator names and arguments.
 
     Args:
         program_json: JSON string whose root and nested subprograms start with
@@ -114,22 +113,4 @@ def decode_program(program_json: str) -> Program:
         The nested program arrays with their ordering and values preserved.
     """
     program = json.loads(program_json)
-    if not _is_program(program):
-        raise ValueError("program_json must encode an operator-led nested array of strings and integers.")
     return cast(Program, program)
-
-
-def _is_program(value: object) -> bool:
-    """
-    Check nested program structure, treating booleans as invalid integer
-    operands even though bool subclasses int in Python.
-
-    Args:
-        value: A decoded JSON value to inspect.
-
-    Returns:
-        Whether the value is an operator-led array of valid operands or subprograms.
-    """
-    if not isinstance(value, list) or not value or not isinstance(value[0], str) or not value[0]:
-        return False
-    return all(type(item) in (str, int) or _is_program(item) for item in value[1:])

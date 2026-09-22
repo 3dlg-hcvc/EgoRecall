@@ -12,6 +12,7 @@ import pyarrow.parquet as pq
 import pytest
 
 from egorecall.data import EgoRecallAnnotations, decode_program, parse_stages
+from egorecall.data.validate_package import validate_annotation_package
 
 
 def test_stable_keys_and_stage_selection(package_root: Path) -> None:
@@ -55,23 +56,23 @@ def test_full_scene_context_and_fresh_records(package_root: Path) -> None:
     Args:
         package_root: Synthetic package including an untargeted table object.
     """
-    annotations = EgoRecallAnnotations(package_root, stages=1)
-    query = annotations.get_query("scene_a", 4)
+    annotation_reader = EgoRecallAnnotations(package_root, stages=1)
+    query = annotation_reader.get_query("scene_a", 4)
     assert decode_program(query["program_json"]) == ["first_seen", "chair"]
 
     query["target_oids"].append(999)
-    assert annotations.get_query("scene_a", 4)["target_oids"] == [1]
+    assert annotation_reader.get_query("scene_a", 4)["target_oids"] == [1]
 
     # Changes to returned metadata must not affect later annotation or frame lookups.
-    scene = annotations.get_scene("scene_a")
-    scene["num_frames"] = 999
-    scene["annotations"] = "annotations/nonexistent.json.gz"
-    assert annotations.get_scene("scene_a")["num_frames"] == 3
+    scene_record = annotation_reader.get_scene("scene_a")
+    scene_record["num_frames"] = 999
+    scene_record["annotations"] = "annotations/nonexistent.json.gz"
+    assert annotation_reader.get_scene("scene_a")["num_frames"] == 3
 
-    annotation = annotations.get_annotations("scene_a")
-    assert annotation["objects"]["2"]["label"] == "table"
-    assert annotation["objects"]["1"]["visibility_segments"] == [[0, 1]]
-    assert annotations.frame_names("scene_a") == ("frame_000000", "frame_000010", "frame_000020")
+    scene_annotations = annotation_reader.get_annotations("scene_a")
+    assert scene_annotations["objects"]["2"]["label"] == "table"
+    assert scene_annotations["objects"]["1"]["visibility_segments"] == [[0, 1]]
+    assert annotation_reader.frame_names("scene_a") == ("frame_000000", "frame_000010", "frame_000020")
 
 
 @pytest.mark.parametrize("scene_id", ["scene_b", "unknown_scene"])
@@ -83,20 +84,20 @@ def test_scene_access_requires_selection(package_root: Path, scene_id: str) -> N
         package_root: Synthetic package with only scene_a represented in stage 1.
         scene_id: Scene outside the reader's selection.
     """
-    annotations = EgoRecallAnnotations(package_root, stages=1)
+    annotation_reader = EgoRecallAnnotations(package_root, stages=1)
     with pytest.raises(KeyError):
-        annotations.get_scene(scene_id)
+        annotation_reader.get_scene(scene_id)
     with pytest.raises(KeyError):
-        annotations.frame_names(scene_id)
+        annotation_reader.frame_names(scene_id)
     with pytest.raises(KeyError):
-        annotations.get_frame_name(scene_id, 0)
+        annotation_reader.get_frame_name(scene_id, 0)
     with pytest.raises(KeyError):
-        annotations.get_annotations(scene_id)
+        annotation_reader.get_annotations(scene_id)
 
 
 def test_reordered_frame_rows_use_explicit_indices(package_root: Path) -> None:
     """
-    Reordered frame rows retain the canonical index-to-name mapping.
+    Reordered frame rows retain the mapping from sampled frame numbers to source filenames.
 
     Args:
         package_root: Synthetic package whose frame rows will be reversed.
@@ -105,13 +106,12 @@ def test_reordered_frame_rows_use_explicit_indices(package_root: Path) -> None:
     table = pq.read_table(path)
     pq.write_table(table.take(list(reversed(range(len(table))))), path)
 
-    annotations = EgoRecallAnnotations(package_root)
-    assert annotations.get_frame_name("scene_a", 2) == "frame_000020"
+    annotation_reader = EgoRecallAnnotations(package_root)
+    assert annotation_reader.get_frame_name("scene_a", 2) == "frame_000020"
 
-    with pytest.raises(ValueError):
-        annotations.get_frame_name("scene_a", -1)
+    assert annotation_reader.get_frame_name("scene_a", -1) == "frame_000020"
     with pytest.raises(IndexError):
-        annotations.get_frame_name("scene_a", 3)
+        annotation_reader.get_frame_name("scene_a", 3)
 
 
 @pytest.mark.parametrize("stages", [4, "1:4", "1:1000000000000"])
@@ -147,10 +147,10 @@ def test_training_is_unstaged(package_root: Path) -> None:
     Args:
         package_root: Synthetic training package with no stage table.
     """
-    annotations = EgoRecallAnnotations(package_root, split="train")
-    assert len(annotations) == 4
-    assert annotations.available_stages == ()
-    assert annotations.stage_for("scene_a", 4) is None
+    annotation_reader = EgoRecallAnnotations(package_root, split="train")
+    assert len(annotation_reader) == 4
+    assert annotation_reader.available_stages == ()
+    assert annotation_reader.stage_for("scene_a", 4) is None
 
     with pytest.raises(ValueError, match="unstaged"):
         EgoRecallAnnotations(package_root, split="train", stages=1)
@@ -163,7 +163,7 @@ def test_unavailable_split_fails(package_root: Path) -> None:
     Args:
         package_root: A test-only package.
     """
-    with pytest.raises(ValueError, match="not packaged"):
+    with pytest.raises(FileNotFoundError):
         EgoRecallAnnotations(package_root, split="val")
 
 
@@ -181,13 +181,13 @@ def test_duplicate_keys_fail(package_root: Path, name: str) -> None:
     pq.write_table(pa.concat_tables([table, table.slice(0, 1)]), path)
 
     with pytest.raises(ValueError, match="[Dd]uplicate"):
-        EgoRecallAnnotations(package_root)
+        validate_annotation_package(package_root)
 
 
 @pytest.mark.parametrize("name", ["stages", "frames"])
 def test_missing_join_row_fails(package_root: Path, name: str) -> None:
     """
-    Query/stage and scene/frame joins must detect incomplete populations.
+    The checker detects a query without a stage assignment or a scene with a missing frame.
 
     Args:
         package_root: Synthetic package to corrupt.
@@ -198,7 +198,7 @@ def test_missing_join_row_fails(package_root: Path, name: str) -> None:
     pq.write_table(table.slice(1), path)
 
     with pytest.raises(ValueError, match="membership differs|incomplete"):
-        EgoRecallAnnotations(package_root)
+        validate_annotation_package(package_root)
 
 
 def test_wrong_query_schema_fails(package_root: Path) -> None:
@@ -214,7 +214,7 @@ def test_wrong_query_schema_fails(package_root: Path) -> None:
     pq.write_table(table.rename_columns(names), path)
 
     with pytest.raises(ValueError, match="incompatible schema"):
-        EgoRecallAnnotations(package_root)
+        validate_annotation_package(package_root)
 
 
 def test_invalid_query_time_fails(package_root: Path) -> None:
@@ -230,25 +230,24 @@ def test_invalid_query_time_fails(package_root: Path) -> None:
     records[0]["frame"] = 3
     pq.write_table(pa.Table.from_pylist(records, schema=table.schema), path)
 
-    with pytest.raises(ValueError, match="outside the canonical timeline"):
-        EgoRecallAnnotations(package_root)
+    with pytest.raises(ValueError, match="outside the scene frame range"):
+        validate_annotation_package(package_root)
 
 
-def test_missing_target_annotation_fails_on_access(package_root: Path) -> None:
+def test_missing_target_annotation_fails_in_checker(package_root: Path) -> None:
     """
-    Annotation loading must check that query targets join to real objects.
+    The checker rejects target IDs absent from the object visibility file.
 
     Args:
         package_root: Package whose object 1 will be replaced by another ID.
     """
     path = package_root / "annotations/scene_a.json.gz"
-    annotation = json.loads(gzip.decompress(path.read_bytes()))
-    annotation["objects"]["3"] = annotation["objects"].pop("1")
-    path.write_bytes(gzip.compress(json.dumps(annotation).encode()))
+    scene_annotations = json.loads(gzip.decompress(path.read_bytes()))
+    scene_annotations["objects"]["3"] = scene_annotations["objects"].pop("1")
+    path.write_bytes(gzip.compress(json.dumps(scene_annotations).encode()))
 
-    annotations = EgoRecallAnnotations(package_root)
     with pytest.raises(ValueError, match="target IDs have no annotation"):
-        annotations.get_annotations("scene_a")
+        validate_annotation_package(package_root)
 
 
 def test_symlinked_payloads_work(package_root: Path, tmp_path: Path) -> None:
@@ -278,8 +277,8 @@ def test_annotation_path_cannot_escape_package(package_root: Path) -> None:
     scenes[0]["annotations"] = "../outside.json.gz"
     path.write_text(json.dumps(scenes))
 
-    with pytest.raises(ValueError, match="stay within"):
-        EgoRecallAnnotations(package_root)
+    with pytest.raises(ValueError, match="relative file path"):
+        validate_annotation_package(package_root)
 
 
 @pytest.mark.parametrize(
@@ -313,7 +312,7 @@ def test_required_manifest_fields_fail_when_missing(package_root: Path, section:
     path.write_text(json.dumps(manifest))
 
     with pytest.raises(KeyError, match=key):
-        EgoRecallAnnotations(package_root)
+        validate_annotation_package(package_root)
 
 
 @pytest.mark.parametrize("section", ["selection", "counts"])
@@ -333,7 +332,7 @@ def test_malformed_manifest_records_fail(package_root: Path, section: str, value
     path.write_text(json.dumps(manifest))
 
     with pytest.raises(ValueError, match=f"manifest/{section}"):
-        EgoRecallAnnotations(package_root)
+        validate_annotation_package(package_root)
 
 
 def test_manifest_split_mismatch_fails(package_root: Path) -> None:
@@ -349,7 +348,7 @@ def test_manifest_split_mismatch_fails(package_root: Path) -> None:
     path.write_text(json.dumps(manifest))
 
     with pytest.raises(ValueError, match="Manifest selection does not match"):
-        EgoRecallAnnotations(package_root)
+        validate_annotation_package(package_root)
 
 
 def test_manifest_counts_require_integers(package_root: Path) -> None:
@@ -365,4 +364,22 @@ def test_manifest_counts_require_integers(package_root: Path) -> None:
     path.write_text(json.dumps(manifest))
 
     with pytest.raises(ValueError, match="manifest/counts/queries"):
-        EgoRecallAnnotations(package_root)
+        validate_annotation_package(package_root)
+
+
+def test_readers_do_not_repeat_package_audit(package_root: Path) -> None:
+    """
+    Manifest totals are checked explicitly rather than whenever query rows are loaded.
+
+    Args:
+        package_root: Valid query files with a deliberately incorrect manifest total.
+    """
+    manifest_path = package_root / "manifest.json"
+    manifest = json.loads(manifest_path.read_text())
+    manifest["counts"]["queries"] = 999
+    manifest_path.write_text(json.dumps(manifest))
+    annotation_reader = EgoRecallAnnotations(package_root)
+    assert len(annotation_reader) == 4
+    assert annotation_reader.get_query("scene_a", 4)["target_oids"] == [1]
+    with pytest.raises(ValueError, match="manifest/counts/queries"):
+        validate_annotation_package(package_root)

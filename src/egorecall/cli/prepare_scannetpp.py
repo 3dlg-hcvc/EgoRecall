@@ -34,7 +34,7 @@ def main() -> None:
 
     # Use scene selection and sampling settings from the annotation package,
     # or take them directly from the command line when preparing without annotations.
-    scenes = None
+    metadata_by_scene = None
     if args.without_annotations:
         if not args.scenes or args.subsample_factor is None or args.split is not None or args.stages is not None:
             parser.error("--without-annotations requires --scenes and --subsample-factor, without --split or --stages.")
@@ -49,25 +49,29 @@ def main() -> None:
         if paths.dataset_root is None:
             parser.error("Preparation with annotations requires dataset_root in the configuration.")
 
-        scenes = load_scene_metadata(paths.dataset_root, args.split, stages=args.stages, scene_ids=args.scenes)
-        scene_ids = tuple(scenes)
+        metadata_by_scene = load_scene_metadata(
+            paths.dataset_root, args.split, stages=args.stages, scene_ids=args.scenes
+        )
+        scene_ids = tuple(metadata_by_scene)
 
-    # Prepare all frames for each selected scene, reusing compatible caches.
+    # Prepare all frames for each selected scene, leaving existing cache files in place.
     for scene_id in scene_ids:
-        source = ScanNetPPScene(paths.scannetpp_root, scene_id)
-        print(f"Preparing or validating {scene_id}...", flush=True)
+        source_scene = ScanNetPPScene(paths.scannetpp_root, scene_id)
+        print(f"Preparing {scene_id}...", flush=True)
 
-        if scenes is None:
-            output = prepare_scene(source, paths.cache_root, subsample_factor=args.subsample_factor, ffmpeg=args.ffmpeg)
-        else:
-            scene = scenes[scene_id]
-            metadata = scene.metadata
+        if metadata_by_scene is None:
             output = prepare_scene(
-                source,
+                source_scene, paths.cache_root, subsample_factor=args.subsample_factor, ffmpeg=args.ffmpeg
+            )
+        else:
+            scene_meta = metadata_by_scene[scene_id]
+            scene_record = scene_meta.scene_record
+            output = prepare_scene(
+                source_scene,
                 paths.cache_root,
-                subsample_factor=metadata["subsample_factor"],
-                source_fps=metadata["source_fps"],
-                expected_frame_names=scene.frame_names,
+                subsample_factor=scene_record["subsample_factor"],
+                source_fps=scene_record["source_fps"],
+                frame_names=scene_meta.frame_names,
                 ffmpeg=args.ffmpeg,
             )
 

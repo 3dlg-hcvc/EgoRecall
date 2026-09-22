@@ -33,8 +33,7 @@ class SourceObject(TypedDict):
 
 def load_annotation(path: Path) -> dict[int, SourceObject]:
     """
-    Index source object records by objectId and reject ambiguous identities.
-    Geometry and segmentation values are validated by their consumers.
+    Read object labels and boxes from segGroups, indexed by ScanNet++ objectId.
 
     Args:
         path: Path to segments_anno.json.
@@ -44,15 +43,4 @@ def load_annotation(path: Path) -> dict[int, SourceObject]:
     """
     with path.open(encoding="utf-8") as stream:
         annotation = json.load(stream)
-    groups = annotation["segGroups"]
-    if not isinstance(groups, list):
-        raise ValueError(f"{path}: segGroups must be a list.")
-
-    # Object IDs are scene-local identities; duplicate IDs must not overwrite records.
-    objects: dict[int, SourceObject] = {}
-    for group in groups:
-        oid = group["objectId"]
-        if type(oid) is not int or oid <= 0 or oid in objects:
-            raise ValueError(f"{path}: invalid or duplicate objectId {oid!r}.")
-        objects[oid] = cast(SourceObject, group)
-    return objects
+    return {object_record["objectId"]: cast(SourceObject, object_record) for object_record in annotation["segGroups"]}

@@ -1,46 +1,43 @@
 """
-Load scene metadata and frame mappings without reading query contents or visibility annotations.
+Read scene settings and frame names without loading query text or object visibility.
 """
 
 import json
-from collections import defaultdict
 from dataclasses import dataclass
 from pathlib import Path
+from typing import cast
 
 import pyarrow as pa
-import pyarrow.compute as pc
 import pyarrow.parquet as pq
 
 from egorecall.data.records import SceneRecord
-from egorecall.data.schema import FRAME_SCHEMA, STAGE_SCHEMA, validate_table
 from egorecall.data.stages import StageRange, parse_stages, require_stage_range
-from egorecall.data.validation import require_integer, require_text, validate_scene
 
 
 @dataclass(frozen=True)
 class SceneMetadata:
     """
-    Scene metadata and the complete canonical frame mapping needed for preparation.
+    The scene's settings from scenes.json and the source name of each sampled frame.
 
     Args:
-        metadata: Scene record containing sampling settings and population counts.
-        frame_names: Source names ordered by canonical frame index.
+        scene_record: Counts, sampling stride, frame rate, and annotation filename.
+        frame_names: Source names ordered by frame_idx from frames/<split>.parquet.
     """
 
-    metadata: SceneRecord
+    scene_record: SceneRecord
     frame_names: tuple[str, ...]
 
 
 def select_scene_ids(available: tuple[str, ...], requested: list[str] | None) -> tuple[str, ...]:
     """
-    Restrict scene work to a nonempty, unique subset of an available selection.
+    Select scene IDs while preserving the order requested by the caller.
 
     Args:
-        available: Scene IDs represented in the selected split/stages.
-        requested: Explicit IDs to retain, or None for the complete available selection.
+        available: IDs represented in the selected split and stages.
+        requested: IDs to use, or None for every available scene.
 
     Returns:
-        Scene IDs in the supplied order, or the available order when omitted.
+        The selected IDs. A requested ID absent from available raises KeyError.
     """
     if requested is None:
         return available
@@ -54,36 +51,43 @@ def select_scene_ids(available: tuple[str, ...], requested: list[str] | None) ->
     return tuple(requested)
 
 
-def index_frame_names(table: pa.Table, scenes: dict[str, SceneRecord]) -> dict[str, tuple[str, ...]]:
+def index_frame_names(frame_table: pa.Table, scene_records: dict[str, SceneRecord]) -> dict[str, tuple[str, ...]]:
     """
-    Validate a scene/frame join and order names by their explicit canonical index.
+    Build a filename lookup for each scene. Frame rows may be stored out of order,
+    so use frame_idx to put them in image order. For example, frame_idx 1 may map
+    to frame_000010 when every tenth ScanNet++ frame is sampled.
 
     Args:
-        table: Schema-validated frame rows for the scenes to index.
-        scenes: Metadata defining each scene's frame count.
+        frame_table: scene_id, frame_idx, and frame_name columns from frames/<split>.parquet.
+        scene_records: Scene records whose num_frames determines each lookup's length.
 
     Returns:
-        Complete canonical frame-name sequences keyed by scene.
+        Tuples keyed by scene ID; indexing a tuple by a query's frame gives its source filename.
     """
-    by_scene: dict[str, dict[int, str]] = defaultdict(dict)
-    for batch in table.to_batches(max_chunksize=8192):
-        for row in batch.to_pylist():
-            scene_id, frame_idx, name = row["scene_id"], row["frame_idx"], row["frame_name"]
-            if scene_id not in scenes:
-                raise ValueError(f"frames: unknown scene {scene_id!r} in the scene metadata.")
-            require_integer(frame_idx, "frames/frame_idx")
-            require_text(name, "frames/frame_name")
-            if frame_idx in by_scene[scene_id]:
-                raise ValueError(f"{scene_id}: duplicate canonical frame index {frame_idx}.")
-            by_scene[scene_id][frame_idx] = name
+    names_by_scene: dict[str, dict[int, str]] = {scene_id: {} for scene_id in scene_records}
+    for batch in frame_table.to_batches(max_chunksize=8192):
+        for frame_row in batch.to_pylist():
+            names_by_scene[frame_row["scene_id"]][frame_row["frame_idx"]] = frame_row["frame_name"]
+    return {
+        scene_id: tuple(names_by_scene[scene_id][frame_idx] for frame_idx in range(scene_record["num_frames"]))
+        for scene_id, scene_record in scene_records.items()
+    }
 
-    ordered: dict[str, tuple[str, ...]] = {}
-    for scene_id, scene in scenes.items():
-        frames = by_scene[scene_id]
-        if set(frames) != set(range(scene["num_frames"])) or len(set(frames.values())) != len(frames):
-            raise ValueError(f"{scene_id}: incomplete or ambiguous canonical frame mapping.")
-        ordered[scene_id] = tuple(frames[i] for i in range(scene["num_frames"]))
-    return ordered
+
+def read_scene_records(dataset_root: Path, split: str) -> dict[str, SceneRecord]:
+    """
+    Read sampling settings and counts for the scenes in one split.
+
+    Args:
+        dataset_root: Directory containing scenes.json.
+        split: Benchmark split to select.
+
+    Returns:
+        Records from scenes.json keyed by scene ID.
+    """
+    with (dataset_root / "scenes.json").open(encoding="utf-8") as stream:
+        scene_records = cast(list[SceneRecord], json.load(stream))
+    return {scene_record["scene_id"]: scene_record for scene_record in scene_records if scene_record["split"] == split}
 
 
 def load_scene_metadata(
@@ -94,23 +98,20 @@ def load_scene_metadata(
     scene_ids: list[str] | None = None,
 ) -> dict[str, SceneMetadata]:
     """
-    Read scene metadata and selected frame mappings for preparation. Read stage
-    assignments only when a stage selection is supplied. Query Parquet files and
-    per-scene visibility payloads are not needed for this operation.
-
-    Check the package format, scene/stage selection, and selected frame mappings.
-    Use the dataset checker for package-wide counts and query membership checks.
+    Read settings and frame names for the scenes to prepare. Stage assignments
+    determine which scenes to include; every included scene keeps all its frames.
+    Run egorecall-check first to validate the annotation files.
 
     Args:
-        dataset_root: EgoRecall directory containing manifest.json and scenes.json.
-        split: Requested split, matching the single-split package manifest.
-        stages: Exact stage, inclusive range, or None for all represented scenes.
+        dataset_root: Directory containing scenes.json and the frame and stage tables.
+        split: Benchmark split to read.
+        stages: Exact stage, inclusive range, or None for all scenes. Omit for training.
         scene_ids: Optional scene subset, preserving the supplied order.
 
     Returns:
-        Scene records and complete frame mappings for the selected scenes.
+        Scene settings and complete frame-name sequences keyed by scene ID.
     """
-    root = dataset_root.expanduser().resolve()
+    dataset_root = dataset_root.expanduser().resolve()
 
     if split not in ("train", "val", "test"):
         raise ValueError(f"Unknown split {split!r}; use train, val, or test.")
@@ -119,84 +120,50 @@ def load_scene_metadata(
     if split == "train" and stage_range is not None:
         raise ValueError("Training is unstaged; omit stages when reading train.")
 
-    # Identify the package format and split before reading scene records.
-    with (root / "manifest.json").open(encoding="utf-8") as stream:
-        manifest = json.load(stream)
-
-    version = require_integer(manifest["schema_version"], "manifest/schema_version", minimum=1)
-    if version != 1:
-        raise ValueError(f"Unsupported package schema_version: {version}.")
-
-    if manifest["selection"]["split"] != split:
-        raise ValueError(f"Manifest selection does not match the requested {split} split.")
-
-    # Find scenes represented in the requested stages, then apply any explicit scene subset.
-    scenes = _read_scenes(root, split)
-    available = tuple(sorted(scene_id for scene_id, scene in scenes.items() if scene["num_queries"] > 0))
+    scene_records = read_scene_records(dataset_root, split)
+    available = tuple(
+        sorted(scene_id for scene_id, scene_record in scene_records.items() if scene_record["num_queries"])
+    )
     if stage_range is not None:
-        available = _stage_scenes(root, split, stage_range)
+        available = _stage_scene_ids(dataset_root, split, stage_range)
 
-    selected = select_scene_ids(available, scene_ids)
-    selected_scenes = {scene_id: scenes[scene_id] for scene_id in selected}
+    selected_ids = select_scene_ids(available, scene_ids)
+    selected_records = {scene_id: scene_records[scene_id] for scene_id in selected_ids}
 
-    # Read and index complete frame mappings for the selected scenes only.
-    frames = pq.read_table(root / "frames" / f"{split}.parquet", filters=[("scene_id", "in", list(selected))])
-    validate_table(frames, FRAME_SCHEMA, "frames")
-    names = index_frame_names(frames, selected_scenes)
-    return {scene_id: SceneMetadata(scene, names[scene_id]) for scene_id, scene in selected_scenes.items()}
+    # Only frame rows for the selected scenes are needed to prepare their caches.
+    frame_table = pq.read_table(
+        dataset_root / "frames" / f"{split}.parquet", filters=[("scene_id", "in", list(selected_ids))]
+    )
+    frame_names = index_frame_names(frame_table, selected_records)
+    return {
+        scene_id: SceneMetadata(scene_record, frame_names[scene_id])
+        for scene_id, scene_record in selected_records.items()
+    }
 
 
-def _read_scenes(root: Path, split: str) -> dict[str, SceneRecord]:
+def _stage_scene_ids(dataset_root: Path, split: str, stage_range: StageRange) -> tuple[str, ...]:
     """
-    Read scene records containing sampling settings and frame counts.
+    Find scenes with at least one query assigned to the requested stages.
 
     Args:
-        root: Annotation package directory.
-        split: Requested benchmark split.
+        dataset_root: Directory containing the stage table.
+        split: Validation or test split.
+        stage_range: First and last stage to include.
 
     Returns:
-        Scene records for the split, keyed by unique scene ID.
+        Sorted scene IDs, with each scene listed once even if it occurs in several stages.
     """
-    with (root / "scenes.json").open(encoding="utf-8") as stream:
-        records = json.load(stream)
-
-    # Validate records and their identities before selecting the split.
-    scenes: dict[str, SceneRecord] = {}
-    for value in records:
-        scene = validate_scene(value)
-        scene_id = scene["scene_id"]
-        if scene_id in scenes:
-            raise ValueError(f"Duplicate scene metadata: {scene_id}.")
-        scenes[scene_id] = scene
-
-    scenes = {scene_id: scene for scene_id, scene in scenes.items() if scene["split"] == split}
-    if not scenes:
-        raise ValueError(f"Split {split!r} is not packaged.")
-    return scenes
-
-
-def _stage_scenes(root: Path, split: str, requested: StageRange) -> tuple[str, ...]:
-    """
-    Select scenes from stage assignments using only scene, split, and stage columns.
-
-    Args:
-        root: Annotation package directory.
-        split: Requested validation or test split.
-        requested: Stage bounds to select.
-
-    Returns:
-        Sorted scene IDs with assignments in the requested range.
-    """
-    # Read the columns needed to select scenes and check the requested stage range.
-    columns = ["scene_id", "split", "stage"]
-    table = pq.read_table(root / "stages" / f"{split}.parquet", columns=columns)
-    validate_table(table, pa.schema([STAGE_SCHEMA.field(name) for name in columns]), "stages")
-    if pc.unique(table["split"]).to_pylist() != [split]:
-        raise ValueError(f"stages: rows disagree with the requested split {split!r}.")
-
-    available = tuple(sorted(pc.unique(table["stage"]).to_pylist()))
-    require_stage_range(requested, available)
-
-    # Multiple query assignments can refer to the same scene.
-    mask = pc.and_(pc.greater_equal(table["stage"], requested.first), pc.less_equal(table["stage"], requested.last))
-    return tuple(sorted(pc.unique(pc.filter(table["scene_id"], mask)).to_pylist()))
+    stage_table = pq.read_table(dataset_root / "stages" / f"{split}.parquet", columns=["scene_id", "stage"])
+    scene_ids_by_stage: dict[int, set[str]] = {}
+    for stage_row in stage_table.to_pylist():
+        scene_ids_by_stage.setdefault(stage_row["stage"], set()).add(stage_row["scene_id"])
+    require_stage_range(stage_range, tuple(sorted(scene_ids_by_stage)))
+    return tuple(
+        sorted(
+            {
+                scene_id
+                for stage in range(stage_range.first, stage_range.last + 1)
+                for scene_id in scene_ids_by_stage[stage]
+            }
+        )
+    )

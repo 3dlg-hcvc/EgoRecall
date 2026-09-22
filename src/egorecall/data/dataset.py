@@ -1,5 +1,5 @@
 """
-Join benchmark queries, bounded observation histories, and separate scene supervision.
+Access query text and past frames for a method, and read answers separately for evaluation.
 """
 
 from __future__ import annotations
@@ -26,7 +26,7 @@ class QueryInput:
         scene_id: Scene containing the observation history.
         query_idx: Stable per-scene query identifier.
         description: Natural-language object reference.
-        frame: Inclusive canonical observation cutoff.
+        frame: Zero-based number of the last frame the method may observe.
     """
 
     scene_id: str
@@ -41,24 +41,26 @@ class ObservationWindow:
     context must remain open while this window is used.
 
     Args:
-        cache: Open observation cache.
-        through_frame: Last canonical frame available to the method.
+        scene_h5: Open scene H5 file.
+        through_frame: Last sampled frame available to the method.
     """
 
-    def __init__(self, cache: SceneH5, through_frame: int) -> None:
+    def __init__(self, scene_h5: SceneH5, through_frame: int) -> None:
         """
-        Bound the accessible timeline without reading image payloads.
+        Keep only the frame indices through the query time. Indexing this shorter
+        sequence prevents future-frame access, including through negative indices.
 
         Args:
-            cache: Open observation cache.
-            through_frame: Inclusive canonical cutoff.
+            scene_h5: Open scene H5 file.
+            through_frame: Zero-based number of the last frame available to the method.
         """
         require_integer(through_frame, "through_frame")
-        if through_frame >= len(cache.frame_names):
+        if through_frame >= len(scene_h5.frame_names):
             raise IndexError("Query cutoff is outside the observation timeline.")
 
-        self._cache = cache
-        self._frame_names = cache.frame_names[: through_frame + 1]
+        self._scene_h5 = scene_h5
+        self._frame_names = scene_h5.frame_names[: through_frame + 1]
+        self._frame_indices = range(len(scene_h5.frame_names))[: through_frame + 1]
 
     @property
     def frame_names(self) -> tuple[str, ...]:
@@ -66,7 +68,7 @@ class ObservationWindow:
         List source names through the query cutoff.
 
         Returns:
-            Immutable names ordered by canonical index.
+            Immutable names ordered by sampled frame index.
         """
         return self._frame_names
 
@@ -84,51 +86,37 @@ class ObservationWindow:
         Decode an available observation, rejecting access beyond the query cutoff.
 
         Args:
-            frame_idx: Zero-based canonical index within this history.
+            frame_idx: Zero-based sampled frame index within this history.
 
         Returns:
             One observation with no target labels, programs, or visibility history.
         """
-        self._require_frame(frame_idx)
-        return self._cache.observation(frame_idx)
+        return self._scene_h5.observation(self._frame_indices[frame_idx])
 
     def camera(self, frame_idx: int) -> FrameCamera:
         """
         Read an available frame's camera metadata without decoding its images.
 
         Args:
-            frame_idx: Zero-based canonical index within this query's history.
+            frame_idx: Zero-based sampled frame index within this query's history.
 
         Returns:
             Frame identity, timestamp, pose, and RGB/depth intrinsics with fresh arrays.
         """
-        self._require_frame(frame_idx)
-        return self._cache.camera(frame_idx)
+        return self._scene_h5.camera(self._frame_indices[frame_idx])
 
     def encoded_image(self, frame_idx: int, kind: str = "rgb") -> bytes:
         """
         Read an encoded image within the same query-time boundary.
 
         Args:
-            frame_idx: Zero-based canonical index within this history.
+            frame_idx: Zero-based sampled frame index within this history.
             kind: One of rgb, depth, or mask.
 
         Returns:
             JPEG or PNG bytes for the requested observation.
         """
-        self._require_frame(frame_idx)
-        return self._cache.encoded_image(frame_idx, kind)
-
-    def _require_frame(self, frame_idx: int) -> None:
-        """
-        Reject invalid indices and future observations without clamping them.
-
-        Args:
-            frame_idx: Requested canonical index.
-        """
-        require_integer(frame_idx, "frame_idx")
-        if frame_idx >= len(self.frame_names):
-            raise IndexError(f"Frame {frame_idx} exceeds the query cutoff {len(self.frame_names) - 1}.")
+        return self._scene_h5.encoded_image(self._frame_indices[frame_idx], kind)
 
     def __iter__(self) -> Iterator[Observation]:
         """
@@ -138,7 +126,7 @@ class ObservationWindow:
             Iterator from frame zero through the query frame.
         """
         for frame_idx in range(len(self.frame_names)):
-            yield self._cache.observation(frame_idx)
+            yield self._scene_h5.observation(frame_idx)
 
 
 @dataclass(frozen=True)
@@ -171,35 +159,6 @@ class SceneSupervision:
     filtered_objects: dict[int, ObjectGeometry]
 
 
-def join_supervision(
-    scene_id: str, objects: dict[int, ObjectGeometry], annotations: SceneAnnotations
-) -> SceneSupervision:
-    """
-    Join filtered visibility annotations to the complete source-object population.
-    Require matching object IDs and labels; missing objects are data errors.
-
-    Args:
-        scene_id: Scene supplying geometry.
-        objects: Full source-object population from a scene cache or raw source reader.
-        annotations: Full-scene EgoRecall visibility annotations.
-
-    Returns:
-        Separate source and filtered object mappings with shared geometry records.
-    """
-    if annotations["scene_id"] != scene_id:
-        raise ValueError("Source scene and annotation scene do not match.")
-
-    filtered: dict[int, ObjectGeometry] = {}
-    for key, annotation in annotations["objects"].items():
-        oid = int(key)
-        obj = objects[oid]
-        if obj.label != annotation["label"]:
-            raise ValueError(f"{scene_id}/{oid}: source and annotation labels differ.")
-        filtered[oid] = obj
-
-    return SceneSupervision(annotations, objects, filtered)
-
-
 class EgoRecallScene:
     """
     Own one scene cache and load its visibility supervision only when requested.
@@ -207,49 +166,39 @@ class EgoRecallScene:
 
     Args:
         paths: Dataset and local cache locations.
-        annotations: Query selection containing this scene.
+        annotation_reader: Query selection containing this scene.
         scene_id: Scene represented by at least one selected query.
     """
 
-    def __init__(self, paths: DatasetPaths, annotations: EgoRecallAnnotations, scene_id: str) -> None:
+    def __init__(self, paths: DatasetPaths, annotation_reader: EgoRecallAnnotations, scene_id: str) -> None:
         """
-        Open and validate a prepared scene against the annotation frame mapping.
+        Open this scene's H5 file. Annotation and cache consistency is checked by egorecall-check.
 
         Args:
             paths: Dataset and cache locations.
-            annotations: Query selection containing this scene.
+            annotation_reader: Query selection containing this scene.
             scene_id: Selected scene.
         """
-        metadata = annotations.get_scene(scene_id)
         if paths.cache_root is None:
             raise ValueError("cache_root is required to read observations.")
 
         self.scene_id = scene_id
-        self._annotations = annotations
-
-        # Keep the handle only if the cache matches this scene's annotation timeline.
-        self._cache = SceneH5(paths.cache_root / f"{scene_id}.h5")
-        try:
-            self._cache.validate_compatibility(
-                scene_id, annotations.frame_names(scene_id), metadata["subsample_factor"], metadata["source_fps"]
-            )
-        except BaseException:
-            self._cache.close()
-            raise
+        self._annotation_reader = annotation_reader
+        self._scene_h5 = SceneH5(paths.cache_root / f"{scene_id}.h5")
 
     def query(self, query_idx: int) -> QuerySample:
         """
-        Select the query inputs and legal history without exposing supervision.
+        Return the query text and frames through its query time, without answer IDs or visibility histories.
 
         Args:
             query_idx: Stable identifier within this scene and dataset selection.
 
         Returns:
-            Text/time/identity and observations through the query frame.
+            QueryInput plus an ObservationWindow containing frames 0 through the query frame.
         """
-        record = self._annotations.get_query(self.scene_id, query_idx)
-        query = QueryInput(self.scene_id, query_idx, record["description"], record["frame"])
-        return QuerySample(query, ObservationWindow(self._cache, query.frame))
+        query_record = self._annotation_reader.get_query(self.scene_id, query_idx)
+        query = QueryInput(self.scene_id, query_idx, query_record["description"], query_record["frame"])
+        return QuerySample(query, ObservationWindow(self._scene_h5, query.frame))
 
     def answer(self, query_idx: int) -> QueryRecord:
         """
@@ -261,24 +210,29 @@ class EgoRecallScene:
         Returns:
             A fresh query dictionary containing its ground-truth answer.
         """
-        return self._annotations.get_query(self.scene_id, query_idx)
+        return self._annotation_reader.get_query(self.scene_id, query_idx)
 
     @cached_property
     def supervision(self) -> SceneSupervision:
         """
-        Join full-scene visibility with cached source geometry once for this scene context.
-        The retained record includes future visibility and must not be passed to methods.
+        Read visibility histories and cached boxes, then select boxes by the annotated
+        object IDs. This includes future visibility and must not be passed to methods.
 
         Returns:
             Scene annotations and explicit source/filtered object populations.
         """
-        return join_supervision(self.scene_id, self._cache.objects(), self._annotations.get_annotations(self.scene_id))
+        scene_annotations = self._annotation_reader.get_annotations(self.scene_id)
+        source_objects = self._scene_h5.objects()
+        filtered_objects = {
+            int(object_id): source_objects[int(object_id)] for object_id in scene_annotations["objects"]
+        }
+        return SceneSupervision(scene_annotations, source_objects, filtered_objects)
 
     def close(self) -> None:
         """
         Close the observation cache and invalidate further image access through its windows.
         """
-        self._cache.close()
+        self._scene_h5.close()
 
     def __enter__(self) -> EgoRecallScene:
         """

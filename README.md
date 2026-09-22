@@ -51,6 +51,25 @@ directories need not exist, and their access permissions are not validated.
 Relative paths resolve from the configuration file's directory, independent of
 the calling directory.
 
+## Check before use
+
+Run the standalone checker after downloading the annotations:
+
+```bash
+egorecall-check --config configs/paths.toml
+```
+
+Before preparation, add `--source --scenes SCENE_ID` to check a scene's source
+files, cameras, boxes, and agreement with the annotations. After preparation,
+run with `--cache --scenes SCENE_ID` to check the H5 file. Use `--source --cache`
+together to also compare the cache with the current source files.
+
+Readers assume the inputs have been checked. They do not repeat schema, count,
+geometry, or checksum audits while loading queries and frames. Missing files,
+keys, and out-of-range accesses raise at the operation that uses them. Run the
+checker again after replacing or modifying annotation, source, or cache files.
+There is no validation marker or automatic check on subsequent reads.
+
 ## Read annotations
 
 ```python
@@ -60,30 +79,30 @@ from egorecall import DatasetPaths
 from egorecall.data import EgoRecallAnnotations, decode_program
 
 paths = DatasetPaths.from_toml(Path("configs/paths.toml"))
-annotations = EgoRecallAnnotations(paths.dataset_root, split="test", stages=1)
+annotation_reader = EgoRecallAnnotations(paths.dataset_root, split="test", stages=1)
 
-query = next(annotations.iter_queries())
+query = next(annotation_reader.iter_queries())
 key = (query["scene_id"], query["query_idx"])
-assert annotations.get_query(*key) == query
+assert annotation_reader.get_query(*key) == query
 
 print(query["description"])
 print(decode_program(query["program_json"]))
-print(annotations.stage_for(*key))
-print(annotations.get_frame_name(query["scene_id"], query["frame"]))
+print(annotation_reader.stage_for(*key))
+print(annotation_reader.get_frame_name(query["scene_id"], query["frame"]))
 
 # Load full-scene supervision once when inspecting several queries in that scene.
-annotation = annotations.get_annotations(query["scene_id"])
-target = annotation["objects"][str(query["target_oids"][0])]
+scene_annotations = annotation_reader.get_annotations(query["scene_id"])
+target = scene_annotations["objects"][str(query["target_oids"][0])]
 print(target["label"], target["visibility_segments"])
 ```
 
 You can also pass a `Path` directly to `EgoRecallAnnotations`, without a configuration
-file. `annotations.query_table` exposes the selected Arrow table for column-oriented
+file. `annotation_reader.query_table` exposes the selected Arrow table for column-oriented
 processing; dictionaries are produced in bounded batches by `iter_queries()`.
 
 ### Query identity and selection
 
-- `(scene_id, query_idx)` is the stable join key. IDs can have gaps and stay
+- `(scene_id, query_idx)` identifies a query in both the query and stage tables. IDs can have gaps and stay
   unchanged across stage selections.
 - `source_query_id` is the identifier assigned when a query record is generated,
   retained through balancing for provenance. `program_depth` is DSL nesting depth.
@@ -94,7 +113,7 @@ processing; dictionaries are produced in bounded batches by `iter_queries()`.
   raises an error if any requested stage is absent from the data directory.
 - Training is unstaged. Omit `stages` when reading a training dataset.
 - `available_stages` and `available_splits` describe the data in the dataset directory;
-  `scene_ids`, `query_keys`, and `len(annotations)` describe this reader's selection.
+  `scene_ids`, `query_keys`, and `len(annotation_reader)` describe this reader's selection.
 - Scene metadata counts from `get_scene()` cover all stored rows for the scene,
   before stage filtering. `get_query()` and `stage_for()` only accept keys
   in the reader's selection.
@@ -109,8 +128,8 @@ the assignment file documents membership across the full benchmark.
 
 ### Annotations and observation boundaries
 
-The query `frame` and frame-table `frame_idx` are zero-based canonical timeline
-indices. Object IDs are scoped to their scene. Visibility segment endpoints are
+The query `frame` and frame-table `frame_idx` count sampled images from zero.
+For example, with a stride of 10, frame 1 refers to source image `frame_000010`. Object IDs are scoped to their scene. Visibility segment endpoints are
 inclusive, and `per_frame` keys are frame indices encoded as JSON strings.
 
 Answers, DSL programs, and visibility annotations are supervision. Scene
@@ -121,15 +140,13 @@ table and exact timestamps come from ScanNet++ camera metadata.
 
 ### Validation and supported layout
 
-The reader checks table schemas, duplicate keys, split and stage membership,
-scene counts, frame alignment/bounds, and selected query structure/target
-partitions. `get_annotations()` additionally checks annotation field types,
-scene/frame identity, object counts, and target-object joins. Annotation files
-are loaded when `get_annotations()` is called.
+`egorecall-check` checks table schemas, duplicate IDs, query/stage assignments,
+scene counts, frame numbers, query programs and answers, and every scene's object
+visibility file. It also checks the file checksums listed in the manifest.
+The readers load these same files without repeating the checks.
 
-The reader supports a data directory for one split, whose manifest explicitly
-declares its split, counts, and (for validation/test) stage range. Missing required
-fields and mismatched declarations raise errors.
+The supported data directory contains one split. Its manifest declares the split,
+counts, and stage range for validation/test data.
 
 `counts.stage_assignments` counts rows in the stage-assignment table, with one
 assignment per validation/test query and zero for unstaged training. For example,
@@ -138,8 +155,8 @@ a dataset containing the 2,000 queries in stage 1 has 2,000 stage assignments.
 The directory layout is `queries/<split>.parquet`,
 `stages/<val-or-test>.parquet`, `frames/<split>.parquet`, `scenes.json`,
 `annotations/<scene_id>.json.gz`, and `manifest.json`, with one Parquet file per
-table. Loading validates data structure and joins; it does not verify all file
-checksums or recompute visibility statistics.
+table. The checker validates the stored visibility statistics and their frame
+references; it does not rerun visibility rendering from source geometry.
 
 ## Prepare ScanNet++ observations
 
@@ -172,22 +189,22 @@ The global `metadata/` directory is needed only when requesting a file through
 Adapted toolkit helpers are documented in
 [scannetpp_common/ATTRIBUTION.md](src/scannetpp_common/ATTRIBUTION.md).
 
-Prepare scenes represented in a benchmark selection:
+Check the raw inputs, then prepare scenes represented in a benchmark selection:
 
 ```bash
-egorecall-prepare --config configs/paths.toml --split test --stages 1
+egorecall-check --config configs/paths.toml --source --scenes SCENE_ID
+egorecall-prepare --config configs/paths.toml --split test --stages 1 --scenes SCENE_ID
+egorecall-check --config configs/paths.toml --cache --scenes SCENE_ID
 ```
 
-Add `--scenes SCENE_ID` to prepare one scene first. Stages choose which scenes to
-prepare; every selected scene retains its complete canonical timeline. Preparation
-requires the source pose timeline to match the dataset's frame table exactly.
+Omit `--scenes` to prepare every scene represented in the requested stages.
+Stages select scenes; every selected scene retains its complete sampled frame
+sequence. The source check verifies that these frame names agree with the
+annotation frame table.
 
-Preparation reads `manifest.json`, `scenes.json`, and frame rows for the selected
-scenes. When `--stages` is supplied, it also reads the scene/split/stage columns
-of the stage-assignment table. It does not read query contents or per-scene
-visibility annotations. Preparation checks the package format, scene/stage selection,
-and selected frame mappings. Use `egorecall-check` for package-wide counts and
-query/annotation consistency checks.
+Preparation reads `scenes.json` and the selected scenes' frame mappings.
+With `--stages`, it reads scene IDs and stage numbers from the assignment table.
+Query text, answers, and object visibility files are not needed for preparation.
 
 Each scene produces `cache_root/<scene_id>.h5`, containing encoded RGB JPEGs,
 sensor-depth PNGs, anonymization-mask PNGs, camera matrices, timestamps, and all
@@ -204,10 +221,10 @@ world Z points up. RGB intrinsics describe the native image grid, and depth
 intrinsics scale their first two rows to the 256×192 sensor grid. Use the inverse
 of `camera_to_world` when a consumer needs world-to-camera transforms.
 
-Repeated preparation validates the existing cache's scene, timeline, cameras,
-object geometry, and source-file hashes before reusing it. Fingerprints include
-`segments_anno.json`, so changes to source boxes or labels invalidate reuse.
-An incompatible cache raises an error.
+Repeated preparation leaves an existing scene cache in place. To detect stale
+caches, run `egorecall-check --source --cache`: it compares source-file hashes,
+cameras, and object boxes with the cache. Use a new cache directory when preparing
+changed inputs or sampling settings.
 New caches are published atomically; interrupted scenes can be prepared again.
 FFmpeg's temporary image files use the system temporary directory (configurable
 with `TMPDIR`); the temporary H5 is built beside its destination for atomic
@@ -222,16 +239,20 @@ To prepare observations without an EgoRecall annotation package, supply the
 scene IDs and sampling stride:
 
 ```bash
+egorecall-check --config configs/paths.toml --without-annotations \
+  --scenes SCENE_ID --subsample-factor 10
 egorecall-prepare --config configs/paths.toml --without-annotations \
   --scenes SCENE_ID --subsample-factor 10
+egorecall-check --config configs/paths.toml --without-annotations \
+  --scenes SCENE_ID --subsample-factor 10 --cache
 ```
 
 This samples sorted pose records every tenth entry, giving a nominal 6 FPS
 timeline from the 60 FPS source. With `--without-annotations`, preparation uses
 only `scannetpp_root` and `cache_root`; omit `dataset_root` from the configuration.
-Both paths use the same observation-preparation process. When an annotation
-package is supplied, its frame mapping is also checked against the source
-timeline. Sensor timestamps remain available in the cache.
+Both paths use the same observation-preparation process. Source checks compare
+frame names with the annotation package when it is supplied. Sensor timestamps
+remain available in the cache.
 
 ## Read query-time observations
 
@@ -244,8 +265,8 @@ from egorecall.data import EgoRecallDataset
 dataset = EgoRecallDataset(DatasetPaths.from_toml(Path("configs/paths.toml")), split="test", stages=1)
 scene_id, query_idx = dataset.annotations.query_keys[0]
 
-with dataset.open_scene(scene_id) as scene:
-    sample = scene.query(query_idx)
+with dataset.open_scene(scene_id) as scene_data:
+    sample = scene_data.query(query_idx)
     print(sample.query.description)
     print(len(sample.observations))
 
@@ -259,10 +280,10 @@ with dataset.open_scene(scene_id) as scene:
     print(camera.timestamp, camera.camera_to_world)
 
     # Request ground truth separately for inspection or evaluation.
-    answer = scene.answer(query_idx)
-    truth = scene.supervision
+    answer = scene_data.answer(query_idx)
+    scene_supervision = scene_data.supervision
     print(answer["target_oids"])
-    print(len(truth.source_objects), len(truth.filtered_objects))
+    print(len(scene_supervision.source_objects), len(scene_supervision.filtered_objects))
 ```
 
 `EgoRecallDataset` is the main entry point. Its `annotations` member is an
@@ -274,7 +295,8 @@ loaded when supervision is requested.
 Pass the `QuerySample` to a method. Its query contains only `scene_id`, `query_idx`,
 `description`, and `frame`; its observation window includes frame zero through
 the query frame. Negative, noninteger, and future-frame indices raise errors.
-The window can be iterated, or accessed as encoded images with
+Negative indices count backward from the query frame: `frame(-1)` is the query
+frame, not the last frame of the full scene. The window can be iterated, or accessed as encoded images with
 `sample.observations.encoded_image(frame_idx, "rgb")`. Keep the scene context open
 while using its windows; closing it closes the HDF5 handle.
 
@@ -285,15 +307,15 @@ Returned camera arrays are independent copies. Full-timeline tools can use
 `SceneH5.camera(frame_idx)` directly; `observation()` includes the same camera
 values alongside decoded RGB, depth, and masks.
 
-`scene.supervision` joins full-scene annotations to cached geometry on first
+`scene_data.supervision` reads visibility histories and cached object boxes on first
 access and retains them for that scene context. `source_objects` contains every ScanNet++
 object; `filtered_objects` contains the EgoRecall visibility-filtered population,
-joined by `objectId` with matching labels. These are ground truth and include
+selected by the object IDs in the visibility annotations. These are ground truth and include
 information unavailable at query time. Observations, answers, and supervision
 all work without a configured or accessible raw ScanNet++ directory after preparation.
 
 For direct source access, use `ScanNetPPScene` from `egorecall.data.scannetpp`.
-Its `cameras(subsample_factor=10)` returns the full canonical camera sequence,
+Its `cameras(subsample_factor=10)` returns the camera records for every sampled frame,
 `objects()` returns all source geometry, and `paths` exposes mesh, segmentation,
 annotation, and iPhone filenames. Box axes are stored as rows, and box lengths
 are full side lengths in metres. `SceneH5` from `egorecall.data.scene_h5` provides
@@ -311,7 +333,7 @@ python examples/inspect_query.py --config configs/paths.toml \
 ## Check data and caches
 
 Verify every package file listed in the integrity manifest, required-file coverage,
-query/frame/stage joins, and all scene annotations:
+query and stage IDs, frame mappings, and all scene annotations:
 
 ```bash
 egorecall-check --config configs/paths.toml
@@ -330,10 +352,11 @@ object IDs/labels. Together, `--source --cache` additionally compare source
 fingerprints, camera values, and all object geometry against the cache.
 These checks use the same source inputs as preparation; they do not require
 meshes, segmentation files, or the global metadata directory.
-`--cache` verifies cached object structure/checksums and joins object IDs and
-labels to the EgoRecall annotations without requiring the raw source. It decodes
-the first and last frames by default; `--decode-all` decodes every frame. Each image read checks
-its encoded checksum. The JSON report states how many files, scenes, queries,
+`--cache` verifies cached object structure/checksums and compares object IDs and
+labels with the EgoRecall annotations without requiring the raw source. It decodes
+the first and last frames by default; `--decode-all` decodes every frame.
+Every cache check verifies all encoded image checksums and headers, including
+frames that are not fully decoded. Normal image reads do not repeat these checks. The JSON report states how many files, scenes, queries,
 and frames were checked. Missing files or mismatches produce errors.
 
 The commands are also available as `python -m egorecall.cli.prepare_scannetpp`

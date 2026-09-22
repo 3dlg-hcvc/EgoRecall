@@ -11,6 +11,7 @@ import pytest
 
 from egorecall.data import EgoRecallAnnotations
 from egorecall.data.metadata import load_scene_metadata
+from egorecall.data.validate_package import validate_annotation_package
 
 
 def test_metadata_selection_matches_annotation_reader(package_root: Path) -> None:
@@ -21,12 +22,12 @@ def test_metadata_selection_matches_annotation_reader(package_root: Path) -> Non
         package_root: Package with three stages, two scenes, and reordered assignments.
     """
     for stages in (None, 1, 2, 3, "1:3", "2:3"):
-        annotations = EgoRecallAnnotations(package_root, stages=stages)
-        scenes = load_scene_metadata(package_root, "test", stages=stages)
-        assert tuple(scenes) == annotations.scene_ids
-        for scene_id, scene in scenes.items():
-            assert scene.metadata == annotations.get_scene(scene_id)
-            assert scene.frame_names == annotations.frame_names(scene_id)
+        annotation_reader = EgoRecallAnnotations(package_root, stages=stages)
+        metadata_by_scene = load_scene_metadata(package_root, "test", stages=stages)
+        assert tuple(metadata_by_scene) == annotation_reader.scene_ids
+        for scene_id, scene_meta in metadata_by_scene.items():
+            assert scene_meta.scene_record == annotation_reader.get_scene(scene_id)
+            assert scene_meta.frame_names == annotation_reader.frame_names(scene_id)
 
     selected = load_scene_metadata(package_root, "test", stages=2, scene_ids=["scene_b", "scene_a"])
     assert tuple(selected) == ("scene_b", "scene_a")
@@ -43,9 +44,9 @@ def test_query_and_visibility_files_are_not_needed(package_root: Path) -> None:
     for path in (package_root / "annotations").iterdir():
         path.unlink()
 
-    scenes = load_scene_metadata(package_root, "test", stages=1)
-    assert tuple(scenes) == ("scene_a",)
-    assert scenes["scene_a"].frame_names == ("frame_000000", "frame_000010", "frame_000020")
+    metadata_by_scene = load_scene_metadata(package_root, "test", stages=1)
+    assert tuple(metadata_by_scene) == ("scene_a",)
+    assert metadata_by_scene["scene_a"].frame_names == ("frame_000000", "frame_000010", "frame_000020")
 
     # Stage assignments are unnecessary when selecting scenes without a stage restriction.
     (package_root / "stages/test.parquet").unlink()
@@ -109,9 +110,9 @@ def test_selected_frames_use_explicit_indices(package_root: Path) -> None:
             row["frame_idx"] = -1
     pq.write_table(pa.Table.from_pylist(rows, schema=table.schema), path)
 
-    scenes = load_scene_metadata(package_root, "test", scene_ids=["scene_a"])
-    assert scenes["scene_a"].frame_names == ("frame_000000", "frame_000010", "frame_000020")
-    with pytest.raises(ValueError):
+    metadata_by_scene = load_scene_metadata(package_root, "test", scene_ids=["scene_a"])
+    assert metadata_by_scene["scene_a"].frame_names == ("frame_000000", "frame_000010", "frame_000020")
+    with pytest.raises(KeyError):
         load_scene_metadata(package_root, "test", scene_ids=["scene_b"])
 
 
@@ -125,11 +126,11 @@ def test_incomplete_selected_frame_mapping_fails(package_root: Path) -> None:
     path = package_root / "frames/test.parquet"
     table = pq.read_table(path)
     pq.write_table(table.slice(1), path)
-    with pytest.raises(ValueError, match="incomplete or ambiguous"):
+    with pytest.raises(KeyError):
         load_scene_metadata(package_root, "test", stages=1)
 
 
-def test_stage_membership_audit_belongs_to_annotation_reader(package_root: Path) -> None:
+def test_stage_membership_audit_belongs_to_checker(package_root: Path) -> None:
     """
     Leave full query-to-stage membership checks to the reader that loads queries.
 
@@ -142,7 +143,7 @@ def test_stage_membership_audit_belongs_to_annotation_reader(package_root: Path)
 
     assert tuple(load_scene_metadata(package_root, "test", stages=1)) == ("scene_a",)
     with pytest.raises(ValueError, match="membership differs"):
-        EgoRecallAnnotations(package_root)
+        validate_annotation_package(package_root)
 
 
 @pytest.mark.parametrize("change", ["scene", "split", "stage_gap", "null"])
@@ -170,12 +171,12 @@ def test_invalid_stage_selection_metadata_fails(package_root: Path, change: str)
     pq.write_table(pa.Table.from_pylist(rows, schema=table.schema), path)
 
     with pytest.raises((ValueError, KeyError)):
-        load_scene_metadata(package_root, "test", stages=2)
+        validate_annotation_package(package_root)
 
 
-def test_manifest_count_audit_belongs_to_annotation_reader(package_root: Path) -> None:
+def test_manifest_count_audit_belongs_to_checker(package_root: Path) -> None:
     """
-    Keep package-wide count checks in the full reader rather than scene preparation.
+    Keep package-wide count checks in the checker rather than scene preparation.
 
     Args:
         package_root: Package whose scene count will be changed.
@@ -186,10 +187,10 @@ def test_manifest_count_audit_belongs_to_annotation_reader(package_root: Path) -
     path.write_text(json.dumps(manifest))
     assert tuple(load_scene_metadata(package_root, "test")) == ("scene_a", "scene_b")
     with pytest.raises(ValueError, match="manifest/counts/scenes"):
-        EgoRecallAnnotations(package_root)
+        validate_annotation_package(package_root)
 
     del manifest["counts"]["frames"]
     path.write_text(json.dumps(manifest))
     assert tuple(load_scene_metadata(package_root, "test")) == ("scene_a", "scene_b")
     with pytest.raises(KeyError, match="frames"):
-        EgoRecallAnnotations(package_root)
+        validate_annotation_package(package_root)
