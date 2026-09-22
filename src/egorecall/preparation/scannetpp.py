@@ -11,15 +11,12 @@ from pathlib import Path
 import h5py
 import numpy as np
 
-from egorecall.data.media import encode_depth, extract_video_frames, validate_image
-from egorecall.data.scannetpp import (
-    DEPTH_SIZE,
-    ObjectGeometry,
-    ScanNetPPScene,
-    object_geometry_sha256,
-    source_frame_index,
-)
-from egorecall.data.scene_h5 import CACHE_VERSION, IMAGE_DATASETS, OBJECT_ARRAY_SHAPES
+from egorecall.data.images import encode_depth, validate_image
+from egorecall.data.scannetpp import ScanNetPPScene, source_frame_index
+from egorecall.data.scene_h5 import CACHE_VERSION, DEPTH_SIZE, IMAGE_DATASETS, OBJECT_ARRAY_SHAPES
+from egorecall.geometry.boxes import ObjectGeometry
+from egorecall.integrity import object_geometry_sha256
+from egorecall.preparation.video import extract_video_frames
 from scannetpp_common.iphone import iter_depth_frames
 
 

@@ -11,17 +11,11 @@ from pathlib import Path
 import pyarrow as pa
 import pyarrow.parquet as pq
 
-from egorecall.data.integrity import relative_file
+from egorecall.arguments import require_integer, require_text
 from egorecall.data.records import QueryRecord, SceneRecord, decode_program
 from egorecall.data.schema import FRAME_SCHEMA, QUERY_SCHEMA, STAGE_SCHEMA
-from egorecall.data.validation import (
-    is_program,
-    require_integer,
-    require_text,
-    validate_annotations,
-    validate_scene,
-    validate_table,
-)
+from egorecall.integrity import relative_file
+from egorecall.validation.records import is_program, validate_annotations, validate_scene, validate_table
 
 
 def validate_frame_mapping(frame_table: pa.Table, scene_records: dict[str, SceneRecord]) -> None:

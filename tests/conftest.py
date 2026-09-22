@@ -15,7 +15,9 @@ import pyarrow as pa
 import pyarrow.parquet as pq
 import pytest
 
+from egorecall.data.scannetpp import ScanNetPPScene
 from egorecall.data.schema import FRAME_SCHEMA, QUERY_SCHEMA, STAGE_SCHEMA
+from egorecall.preparation.scannetpp import prepare_scene
 
 
 @pytest.fixture
@@ -253,4 +255,27 @@ def raw_root(tmp_path: Path, ffmpeg_path: str) -> Path:
     (scans / "segments_anno.json").write_text(json.dumps({"segGroups": objects}))
     (scans / "segments.json").write_text(json.dumps({"segIndices": [0, 1, 2]}))
     (scans / "mesh_aligned_0.05.ply").write_text("ply\nformat ascii 1.0\nelement vertex 0\nend_header\n")
+    return root
+
+
+@pytest.fixture
+def prepared_cache(raw_root: Path, package_root: Path, tmp_path: Path, ffmpeg_path: str) -> Path:
+    """
+    Prepare the synthetic scene using the package's actual frame mapping.
+
+    Args:
+        raw_root: Synthetic original-layout source scene.
+        package_root: Matching three-frame annotation package.
+        tmp_path: Isolated writable cache parent.
+        ffmpeg_path: FFmpeg executable.
+
+    Returns:
+        Cache directory containing scene_a.h5.
+    """
+    root = tmp_path / "cache"
+    prepare_scene(
+        ScanNetPPScene(raw_root, "scene_a"),
+        root,
+        ffmpeg=ffmpeg_path,
+    )
     return root

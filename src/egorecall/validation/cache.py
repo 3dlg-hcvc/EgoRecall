@@ -14,12 +14,13 @@ import numpy as np
 from numpy.typing import NDArray
 from PIL import Image
 
-from egorecall.data.integrity import FileFingerprint
-from egorecall.data.media import validate_image
-from egorecall.data.scannetpp import DEPTH_SIZE, CameraSequence, ObjectGeometry, object_geometry_sha256
-from egorecall.data.scene_h5 import CACHE_VERSION, IMAGE_DATASETS, OBJECT_ARRAY_SHAPES
-from egorecall.data.validate_sources import validate_cameras, validate_object_geometry
-from egorecall.data.validation import require_integer, require_text
+from egorecall.arguments import require_integer, require_text
+from egorecall.data.images import validate_image
+from egorecall.data.scene_h5 import CACHE_VERSION, DEPTH_SIZE, IMAGE_DATASETS, OBJECT_ARRAY_SHAPES
+from egorecall.geometry.boxes import ObjectGeometry
+from egorecall.geometry.cameras import CameraSequence
+from egorecall.integrity import FileFingerprint, object_geometry_sha256
+from egorecall.validation.sources import validate_cameras, validate_object_geometry
 
 
 def validate_scene_cache(path: Path, *, decode_all: bool = False) -> int:

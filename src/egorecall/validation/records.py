@@ -3,11 +3,11 @@ Validate JSON field types, required keys, and scene/object/frame identities
 before returning typed annotation records.
 """
 
-import math
 from typing import cast
 
 import pyarrow as pa
 
+from egorecall.arguments import require_integer, require_number, require_text
 from egorecall.data.records import FrameVisibility, ObjectAnnotation, SceneAnnotations, SceneRecord, TemporalSummary
 
 
@@ -26,51 +26,6 @@ def require_fields(value: object, fields: frozenset[str], context: str) -> dict[
     if not isinstance(value, dict) or set(value) != fields:
         raise ValueError(f"{context}: expected fields {sorted(fields)}.")
     return cast(dict[str, object], value)
-
-
-def require_integer(value: object, context: str, minimum: int = 0) -> int:
-    """
-    Require a Python integer at or above minimum. Booleans are rejected.
-
-    Args:
-        value: Value to check.
-        context: Field description used in errors.
-        minimum: Smallest accepted value.
-
-    Returns:
-        The validated integer.
-    """
-    if type(value) is not int or value < minimum:
-        raise ValueError(f"{context}: expected an integer >= {minimum}.")
-    return value
-
-
-def require_text(value: object, context: str) -> str:
-    """
-    Require a string containing at least one non-whitespace character.
-
-    Args:
-        value: Value to check.
-        context: Field description used in errors.
-
-    Returns:
-        The input string, including any surrounding whitespace.
-    """
-    if not isinstance(value, str) or not value.strip():
-        raise ValueError(f"{context}: expected a nonempty string.")
-    return value
-
-
-def require_number(value: object, context: str) -> None:
-    """
-    Require a finite, nonnegative numeric statistic. Validation leaves its value unchanged.
-
-    Args:
-        value: Numeric statistic to check.
-        context: Field description used in errors.
-    """
-    if type(value) not in (int, float) or not math.isfinite(value) or value < 0:
-        raise ValueError(f"{context}: expected a finite, nonnegative number.")
 
 
 def validate_scene(value: object) -> SceneRecord:

@@ -5,6 +5,25 @@ observations. This package reads the query tables and annotations, prepares
 RGB-D observations from a local ScanNet++ download, and provides query-time
 observation access with separate ground-truth supervision.
 
+## Repository layout
+
+| Location | Contents |
+|---|---|
+| `src/egorecall/data/` | Dataset, annotation, ScanNet++, and H5 readers; table schemas and image codecs |
+| `src/egorecall/preparation/` | ScanNet++ to H5 preparation and FFmpeg frame extraction |
+| `src/egorecall/validation/` | Standalone annotation, source, and cache checks |
+| `src/egorecall/geometry/` | Shared camera and box records and intrinsic scaling |
+| `src/egorecall/arguments.py`, `src/egorecall/integrity.py` | Shared value checks, file/path helpers, and fingerprints |
+| `src/egorecall/cli/` | Command-line entry points |
+| `src/scannetpp_common/` | Attributed ScanNet++ toolkit adaptations |
+| `tests/` | Data, preparation, validation, and integration tests with shared fixtures |
+| `examples/` | Small examples using the public API |
+
+The `datagen/`, `dsl/`, `features/`, `evaluation/`, `baselines/`, and `packaging/`
+packages reserve locations for those workflows and currently contain empty
+initializers. Configuration subdirectories, `docs/`, `scripts/`, and
+`third_party/` are also reserved; the base environment is defined in `environment.yml`.
+
 ## Install
 
 From the repository root, create a Python 3.12 environment and install the package:

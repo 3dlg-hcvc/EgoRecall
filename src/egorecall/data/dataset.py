@@ -9,12 +9,12 @@ from dataclasses import dataclass
 from functools import cached_property
 from types import TracebackType
 
+from egorecall.arguments import require_integer
 from egorecall.config import DatasetPaths
 from egorecall.data.annotations import EgoRecallAnnotations
 from egorecall.data.records import QueryRecord, SceneAnnotations
-from egorecall.data.scannetpp import ObjectGeometry
 from egorecall.data.scene_h5 import FrameCamera, Observation, SceneH5
-from egorecall.data.validation import require_integer
+from egorecall.geometry.boxes import ObjectGeometry
 
 
 @dataclass(frozen=True)

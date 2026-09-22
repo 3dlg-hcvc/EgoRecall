@@ -12,7 +12,7 @@ import pyarrow.parquet as pq
 import pytest
 
 from egorecall.data import EgoRecallAnnotations, decode_program, parse_stages
-from egorecall.data.validate_package import validate_annotation_package
+from egorecall.validation.package import validate_annotation_package
 
 
 def test_stable_keys_and_stage_selection(package_root: Path) -> None:

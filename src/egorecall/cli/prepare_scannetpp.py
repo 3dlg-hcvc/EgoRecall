@@ -7,8 +7,8 @@ from pathlib import Path
 
 from egorecall.config import DatasetPaths
 from egorecall.data.metadata import load_scene_metadata
-from egorecall.data.prepare import prepare_scene
 from egorecall.data.scannetpp import ScanNetPPScene
+from egorecall.preparation.scannetpp import prepare_scene
 
 
 def main() -> None:

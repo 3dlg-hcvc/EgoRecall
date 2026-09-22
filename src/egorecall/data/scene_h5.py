@@ -56,14 +56,11 @@ import h5py
 import numpy as np
 from numpy.typing import NDArray
 
-from egorecall.data.media import decode_image
-from egorecall.data.scannetpp import (
-    DEPTH_SIZE,
-    CameraSequence,
-    ObjectGeometry,
-    scale_intrinsics,
-)
+from egorecall.data.images import decode_image
+from egorecall.geometry.boxes import ObjectGeometry
+from egorecall.geometry.cameras import CameraSequence, scale_intrinsics
 
+DEPTH_SIZE = (256, 192)
 CACHE_VERSION = 2
 IMAGE_DATASETS = {"rgb": "rgb_jpg", "depth": "depth_png", "mask": "mask_png"}
 OBJECT_ARRAY_SHAPES = {"centroid": (3,), "axes": (3, 3), "lengths": (3,), "minimum": (3,), "maximum": (3,)}

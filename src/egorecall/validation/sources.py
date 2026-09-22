@@ -7,9 +7,11 @@ import re
 
 import numpy as np
 
+from egorecall.arguments import require_integer, require_text
 from egorecall.data.records import SceneAnnotations
-from egorecall.data.scannetpp import CameraSequence, ObjectGeometry, ScanNetPPScene, source_frame_index
-from egorecall.data.validation import require_integer, require_text
+from egorecall.data.scannetpp import ScanNetPPScene, source_frame_index
+from egorecall.geometry.boxes import ObjectGeometry
+from egorecall.geometry.cameras import CameraSequence
 
 
 def validate_source_scene(

@@ -8,7 +8,7 @@ from dataclasses import asdict
 from pathlib import Path
 
 from egorecall.config import DatasetPaths
-from egorecall.data.check import check_dataset, check_source_scenes
+from egorecall.validation.check import check_dataset, check_source_scenes
 
 
 def main() -> None:

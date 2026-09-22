@@ -11,7 +11,7 @@ import pytest
 
 from egorecall.data import EgoRecallAnnotations
 from egorecall.data.metadata import load_scene_metadata
-from egorecall.data.validate_package import validate_annotation_package
+from egorecall.validation.package import validate_annotation_package
 
 
 def test_metadata_selection_matches_annotation_reader(package_root: Path) -> None:

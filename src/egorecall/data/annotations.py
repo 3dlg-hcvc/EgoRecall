@@ -11,10 +11,10 @@ from typing import cast
 import pyarrow as pa
 import pyarrow.parquet as pq
 
+from egorecall.arguments import require_integer
 from egorecall.data.metadata import index_frame_names, read_scene_records
 from egorecall.data.records import QueryKey, QueryRecord, SceneAnnotations, SceneRecord, Split
 from egorecall.data.stages import parse_stages, require_stage_range
-from egorecall.data.validation import require_integer
 
 
 class EgoRecallAnnotations:

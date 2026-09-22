@@ -8,17 +8,17 @@ from pathlib import Path
 
 import h5py
 
+from egorecall.arguments import require_integer
 from egorecall.config import DatasetPaths
 from egorecall.data.annotations import EgoRecallAnnotations
-from egorecall.data.integrity import fingerprint_file, relative_file
 from egorecall.data.metadata import select_scene_ids
 from egorecall.data.records import SceneAnnotations
 from egorecall.data.scannetpp import ScanNetPPScene
 from egorecall.data.scene_h5 import SceneH5
-from egorecall.data.validate_cache import validate_cache_compatibility, validate_scene_cache
-from egorecall.data.validate_package import validate_annotation_package
-from egorecall.data.validate_sources import validate_object_annotations, validate_source_scene
-from egorecall.data.validation import require_integer
+from egorecall.integrity import fingerprint_file, relative_file
+from egorecall.validation.cache import validate_cache_compatibility, validate_scene_cache
+from egorecall.validation.package import validate_annotation_package
+from egorecall.validation.sources import validate_object_annotations, validate_source_scene
 
 
 @dataclass(frozen=True)
