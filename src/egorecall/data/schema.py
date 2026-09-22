@@ -1,6 +1,6 @@
 """
-Column names and Arrow types for query, stage, and frame tables. The reader validates
-names and types before joining records or interpreting integer identifiers.
+Column names and Arrow types for query, stage, and frame tables. The standalone checker
+compares these schemas with the Parquet tables before the readers use them.
 """
 
 import pyarrow as pa
@@ -40,18 +40,3 @@ FRAME_SCHEMA = pa.schema(
         ("frame_name", pa.string()),
     ]
 )
-
-
-def validate_table(table: pa.Table, schema: pa.Schema, name: str) -> None:
-    """
-    Require the expected Arrow columns/types and reject null fields at the read boundary.
-
-    Args:
-        table: Loaded table or column projection.
-        schema: Expected schema for those columns.
-        name: Table description used in validation errors.
-    """
-    if not table.schema.equals(schema, check_metadata=False):
-        raise ValueError(f"{name}: incompatible schema; expected {schema.names}, got {table.column_names}.")
-    if any(column.null_count for column in table.columns):
-        raise ValueError(f"{name}: null table fields are not allowed.")

@@ -6,6 +6,8 @@ before returning typed annotation records.
 import math
 from typing import cast
 
+import pyarrow as pa
+
 from egorecall.data.records import FrameVisibility, ObjectAnnotation, SceneAnnotations, SceneRecord, TemporalSummary
 
 
@@ -73,8 +75,8 @@ def require_number(value: object, context: str) -> None:
 
 def validate_scene(value: object) -> SceneRecord:
     """
-    Check the scene metadata fields needed for split, frame, and annotation
-    joins. Counts describe the package before a reader's stage selection.
+    Check sampling settings, counts, and the visibility filename in one scenes.json
+    record. Counts describe all data stored for the scene, before selecting stages.
 
     Args:
         value: One decoded entry from scenes.json.
@@ -102,7 +104,7 @@ def validate_scene(value: object) -> SceneRecord:
     return cast(SceneRecord, record)
 
 
-def validate_annotations(value: object, scene: SceneRecord) -> SceneAnnotations:
+def validate_annotations(value: object, scene_record: SceneRecord) -> SceneAnnotations:
     """
     Validate a scene's annotation structure and object/frame identities.
     Histories cover the complete scene timeline, including observations after
@@ -110,31 +112,31 @@ def validate_annotations(value: object, scene: SceneRecord) -> SceneAnnotations:
 
     Args:
         value: Decoded per-scene JSON annotation.
-        scene: Metadata to join against.
+        scene_record: Expected scene ID, frame count, and object count from scenes.json.
 
     Returns:
         The input annotation record with validated nested field types.
     """
-    scene_id = scene["scene_id"]
+    scene_id = scene_record["scene_id"]
     record = require_fields(value, SceneAnnotations.__required_keys__, f"{scene_id}/annotations")
     if type(record["schema_version"]) is not int or record["schema_version"] != 1:
         raise ValueError(f"{scene_id}: unsupported annotation schema_version.")
 
     n_frames = require_integer(record["num_frames"], f"{scene_id}/num_frames", minimum=1)
-    if record["scene_id"] != scene_id or n_frames != scene["num_frames"]:
+    if record["scene_id"] != scene_id or n_frames != scene_record["num_frames"]:
         raise ValueError(f"{scene_id}: annotation scene or timeline does not match scenes.json.")
 
     require_text(record["visibility_filter"], f"{scene_id}/visibility_filter")
     require_integer(record["image_pixels"], f"{scene_id}/image_pixels", minimum=1)
 
     # Validate every retained object, including contextual objects not in answers.
-    objects = record["objects"]
-    if not isinstance(objects, dict) or len(objects) != scene["num_objects"]:
+    object_annotations = record["objects"]
+    if not isinstance(object_annotations, dict) or len(object_annotations) != scene_record["num_objects"]:
         raise ValueError(f"{scene_id}: annotation object count does not match scenes.json.")
-    for oid, obj in objects.items():
+    for oid, object_annotation in object_annotations.items():
         if not isinstance(oid, str) or not oid.isdecimal() or int(oid) <= 0 or str(int(oid)) != oid:
             raise ValueError(f"{scene_id}: invalid annotation object ID {oid!r}.")
-        _validate_object(obj, n_frames, f"{scene_id}/{oid}")
+        _validate_object(object_annotation, n_frames, f"{scene_id}/{oid}")
 
     return cast(SceneAnnotations, record)
 
@@ -145,26 +147,26 @@ def _validate_object(value: object, n_frames: int, context: str) -> None:
 
     Args:
         value: One decoded object annotation.
-        n_frames: Number of canonical frames in the scene.
+        n_frames: Number of sampled frames in the scene.
         context: Scene/object description used in errors.
     """
-    obj = require_fields(value, ObjectAnnotation.__required_keys__, context)
-    require_text(obj["label"], f"{context}/label")
+    object_annotation = require_fields(value, ObjectAnnotation.__required_keys__, context)
+    require_text(object_annotation["label"], f"{context}/label")
 
     # Check timeline bounds and aggregate visibility statistics.
-    temporal = require_fields(obj["temporal"], TemporalSummary.__required_keys__, f"{context}/temporal")
+    temporal = require_fields(object_annotation["temporal"], TemporalSummary.__required_keys__, f"{context}/temporal")
     for field in ("first_seen_frame", "last_seen_frame", "peak_visibility_frame"):
         frame = require_integer(temporal[field], f"{context}/{field}")
         if frame >= n_frames:
-            raise ValueError(f"{context}/{field}: frame outside the canonical timeline.")
+            raise ValueError(f"{context}/{field}: frame outside the sampled frame sequence.")
 
     count = require_integer(temporal["total_visible_frames"], f"{context}/total_visible_frames", minimum=1)
     if count > n_frames:
         raise ValueError(f"{context}: total_visible_frames exceeds the scene length.")
     require_number(temporal["peak_visible_area_frac"], f"{context}/peak_visible_area_frac")
 
-    # Segments and observations both use canonical indices; segment ends are inclusive.
-    segments = obj["visibility_segments"]
+    # Segments and observations both use sampled frame indices; segment ends are inclusive.
+    segments = object_annotation["visibility_segments"]
     if not isinstance(segments, list):
         raise ValueError(f"{context}: visibility_segments must be a list.")
     for segment in segments:
@@ -175,7 +177,7 @@ def _validate_object(value: object, n_frames: int, context: str) -> None:
         if not start <= end < n_frames:
             raise ValueError(f"{context}: invalid visibility segment bounds.")
 
-    observations = obj["per_frame"]
+    observations = object_annotation["per_frame"]
     if not isinstance(observations, dict):
         raise ValueError(f"{context}: per_frame must be a dictionary.")
     for frame_key, statistics in observations.items():
@@ -183,8 +185,39 @@ def _validate_object(value: object, n_frames: int, context: str) -> None:
             raise ValueError(f"{context}: invalid observation frame {frame_key!r}.")
         frame_idx = int(frame_key)
         if str(frame_idx) != frame_key or frame_idx >= n_frames:
-            raise ValueError(f"{context}: observation frame outside the canonical timeline.")
+            raise ValueError(f"{context}: observation frame outside the sampled frame sequence.")
 
         values = require_fields(statistics, FrameVisibility.__required_keys__, f"{context}/{frame_key}")
         for name, fraction in values.items():
             require_number(fraction, f"{context}/{frame_key}/{name}")
+
+
+def validate_table(table: pa.Table, schema: pa.Schema, name: str) -> None:
+    """
+    Require the expected Arrow columns/types and reject null fields at the read boundary.
+
+    Args:
+        table: Loaded table or column projection.
+        schema: Expected schema for those columns.
+        name: Table description used in validation errors.
+    """
+    if not table.schema.equals(schema, check_metadata=False):
+        raise ValueError(f"{name}: incompatible schema; expected {schema.names}, got {table.column_names}.")
+    if any(column.null_count for column in table.columns):
+        raise ValueError(f"{name}: null table fields are not allowed.")
+
+
+def is_program(value: object) -> bool:
+    """
+    Check nested program structure, treating booleans as invalid integer
+    operands even though bool subclasses int in Python.
+
+    Args:
+        value: A decoded JSON value to inspect.
+
+    Returns:
+        Whether the value is an operator-led array of valid operands or subprograms.
+    """
+    if not isinstance(value, list) or not value or not isinstance(value[0], str) or not value[0]:
+        return False
+    return all(type(item) in (str, int) or is_program(item) for item in value[1:])
