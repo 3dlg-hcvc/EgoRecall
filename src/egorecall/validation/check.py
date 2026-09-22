@@ -2,6 +2,7 @@
 Validate annotation files, raw ScanNet++ inputs, and prepared H5 caches before using the readers.
 """
 
+import gzip
 import json
 from dataclasses import dataclass
 from pathlib import Path
@@ -10,13 +11,13 @@ import h5py
 
 from egorecall.arguments import require_integer
 from egorecall.config import DatasetPaths
-from egorecall.data.annotations import EgoRecallAnnotations
-from egorecall.data.metadata import select_scene_ids
+from egorecall.data.metadata import load_scene_metadata, read_scene_records, select_scene_ids
 from egorecall.data.records import SceneAnnotations
 from egorecall.data.scannetpp import ScanNetPPScene
 from egorecall.data.scene_h5 import SceneH5
 from egorecall.integrity import fingerprint_file, relative_file
 from egorecall.validation.cache import validate_cache_compatibility, validate_scene_cache
+from egorecall.validation.manifest import manifest_splits
 from egorecall.validation.package import validate_annotation_package
 from egorecall.validation.sources import validate_object_annotations, validate_source_scene
 
@@ -28,9 +29,9 @@ class CheckReport:
 
     Args:
         files_verified: Files checked against the dataset manifest.
-        queries_checked: Query records validated in the package's full split.
+        queries_checked: Query records validated in the package's splits.
         annotation_scenes: Scene annotation payloads validated.
-        source_scenes: Scenes joined to raw geometry and cameras.
+        source_scenes: Scenes whose ScanNet++ camera and object records were checked.
         cache_scenes: Prepared scene caches checked for compatibility.
         frames_decoded: Cached RGB-D observations fully decoded and checksummed.
     """
@@ -68,10 +69,11 @@ def verify_package(root: Path) -> int:
             raise ValueError(f"{name}: bytes or SHA-256 do not match manifest.json.")
 
     # A valid checksum list must cover the tables and scene files used for loading.
-    split = manifest["selection"]["split"]
-    required = {"scenes.json", f"queries/{split}.parquet", f"frames/{split}.parquet"}
-    if split != "train":
-        required.add(f"stages/{split}.parquet")
+    required = {"scenes.json"}
+    for split in manifest_splits(manifest):
+        required.update((f"queries/{split}.parquet", f"frames/{split}.parquet"))
+        if split != "train":
+            required.add(f"stages/{split}.parquet")
 
     with (root / "scenes.json").open(encoding="utf-8") as stream:
         required.update(scene_record["annotations"] for scene_record in json.load(stream))
@@ -90,14 +92,14 @@ def check_dataset(
     decode_all: bool = False,
 ) -> CheckReport:
     """
-    Check the complete annotation package and optional source/cache scene joins.
+    Check all EgoRecall annotations and optionally their ScanNet++ source files and prepared H5 caches.
     A scene selection limits source/cache work; package integrity still covers
     every manifest file and all query/annotation records.
 
     Args:
         paths: Configured dataset locations.
         scene_ids: Optional source/cache scene subset.
-        check_source: Validate source camera timelines, object geometry, and annotation joins.
+        check_source: Check source cameras and boxes, and compare frame names and object IDs/labels with annotations.
         check_cache: Require and validate a prepared cache for each selected scene.
         decode_all: Decode every cached frame; otherwise check the first and last.
 
@@ -115,31 +117,37 @@ def check_dataset(
 
     # Validate all annotations before limiting the source/cache work to selected scenes.
     files_verified = verify_package(paths.dataset_root)
-    validate_annotation_package(paths.dataset_root)
-    with (paths.dataset_root / "manifest.json").open(encoding="utf-8") as stream:
-        manifest = json.load(stream)
-    annotation_reader = EgoRecallAnnotations(paths.dataset_root, split=manifest["selection"]["split"])
-    selected_ids = select_scene_ids(annotation_reader.scene_ids, scene_ids)
+    split_counts = validate_annotation_package(paths.dataset_root)
+    scene_records = read_scene_records(paths.dataset_root)
+    selected_ids = select_scene_ids(tuple(sorted(scene_records)), scene_ids)
 
     frames_decoded = 0
-    for scene_id in selected_ids:
-        scene_record = annotation_reader.get_scene(scene_id)
-        frames_decoded += _check_scene_assets(
-            paths,
-            scene_id,
-            scene_record["subsample_factor"],
-            scene_record["source_fps"],
-            frame_names=annotation_reader.frame_names(scene_id),
-            scene_annotations=annotation_reader.get_annotations(scene_id),
-            check_source=check_source,
-            check_cache=check_cache,
-            decode_all=decode_all,
-        )
+    if check_source or check_cache:
+        for split in split_counts:
+            split_scene_ids = [scene_id for scene_id in selected_ids if scene_records[scene_id]["split"] == split]
+            if not split_scene_ids:
+                continue
+            metadata_by_scene = load_scene_metadata(paths.dataset_root, split, scene_ids=split_scene_ids)
+            for scene_id, scene_meta in metadata_by_scene.items():
+                scene_record = scene_meta.scene_record
+                with gzip.open(paths.dataset_root / scene_record["annotations"], "rt", encoding="utf-8") as stream:
+                    scene_annotations = json.load(stream)
+                frames_decoded += _check_scene_assets(
+                    paths,
+                    scene_id,
+                    scene_record["subsample_factor"],
+                    scene_record["source_fps"],
+                    frame_names=scene_meta.frame_names,
+                    scene_annotations=scene_annotations,
+                    check_source=check_source,
+                    check_cache=check_cache,
+                    decode_all=decode_all,
+                )
 
     return CheckReport(
         files_verified,
-        len(annotation_reader),
-        len(annotation_reader.scene_ids),
+        sum(counts["queries"] for counts in split_counts.values()),
+        sum(counts["scenes"] for counts in split_counts.values()),
         len(selected_ids) if check_source else 0,
         len(selected_ids) if check_cache else 0,
         frames_decoded,

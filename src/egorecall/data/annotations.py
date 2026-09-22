@@ -9,6 +9,7 @@ from pathlib import Path
 from typing import cast
 
 import pyarrow as pa
+import pyarrow.compute as pc
 import pyarrow.parquet as pq
 
 from egorecall.arguments import require_integer
@@ -51,35 +52,46 @@ class EgoRecallAnnotations:
             if self.stage_range is not None:
                 raise ValueError("Training is unstaged; omit stages when reading train.")
 
-        scene_records = read_scene_records(self.root, split)
-        self.available_splits = tuple(sorted({scene_record["split"] for scene_record in scene_records.values()}))
-        query_table = pq.read_table(self.root / "queries" / f"{split}.parquet")
-        query_keys = list(zip(query_table["scene_id"].to_pylist(), query_table["query_idx"].to_pylist()))
+        scene_records = read_scene_records(self.root)
+        represented_splits = {scene_record["split"] for scene_record in scene_records.values()}
+        self.available_splits = tuple(name for name in ("train", "val", "test") if name in represented_splits)
 
-        # Match assignments by IDs because stage rows may be stored in a different order.
+        # Select stage assignments first so a small evaluation subset does not load every query.
         stage_by_key: dict[QueryKey, int] = {}
+        query_filters = None
+        self.available_stages: tuple[int, ...] = ()
         if split != "train":
             stage_table = pq.read_table(self.root / "stages" / f"{split}.parquet")
+            self.available_stages = tuple(sorted(pc.unique(stage_table["stage"]).to_pylist()))
+            
+            if self.stage_range is not None:
+                require_stage_range(self.stage_range, self.available_stages)
+                stage_table = stage_table.filter(
+                    pc.and_(
+                        pc.greater_equal(stage_table["stage"], self.stage_range.first),
+                        pc.less_equal(stage_table["stage"], self.stage_range.last),
+                    )
+                )
+            
             stage_by_key = {(row["scene_id"], row["query_idx"]): row["stage"] for row in stage_table.to_pylist()}
-        self.available_stages = tuple(sorted(set(stage_by_key.values())))
+            
+            if self.stage_range is not None:
+                # Match scene/query pairs because query_idx values can repeat across scenes.
+                query_ids_by_scene: dict[str, list[int]] = {}
+                for scene_id, query_idx in stage_by_key:
+                    query_ids_by_scene.setdefault(scene_id, []).append(query_idx)
+                query_filters = [
+                    [("scene_id", "=", scene_id), ("query_idx", "in", query_ids)]
+                    for scene_id, query_ids in query_ids_by_scene.items()
+                ]
 
-        selected = list(range(len(query_keys)))
-        if self.stage_range is not None:
-            require_stage_range(self.stage_range, self.available_stages)
-            positions_by_stage: dict[int, list[int]] = {stage: [] for stage in self.available_stages}
-            for position, key in enumerate(query_keys):
-                positions_by_stage[stage_by_key[key]].append(position)
-            selected = sorted(
-                position
-                for stage in range(self.stage_range.first, self.stage_range.last + 1)
-                for position in positions_by_stage[stage]
-            )
-
-        # Preserve file order, and reuse the Arrow table when all queries are selected.
-        self._queries = query_table if len(selected) == len(query_keys) else query_table.take(selected)
-        self.query_keys = tuple(query_keys[position] for position in selected)
+        # Read matching rows in file order; query_idx values remain independent of table positions.
+        self._queries = pq.read_table(self.root / "queries" / f"{split}.parquet", filters=query_filters)
+        self.query_keys = tuple(zip(self._queries["scene_id"].to_pylist(), self._queries["query_idx"].to_pylist()))
         self._query_positions = {key: position for position, key in enumerate(self.query_keys)}
-        self._stage_by_key = {key: stage_by_key[key] if split != "train" else None for key in self.query_keys}
+        self._query_stages = (
+            tuple(stage_by_key[key] for key in self.query_keys) if split != "train" else (None,) * len(self)
+        )
         self.scene_ids = tuple(sorted({scene_id for scene_id, _ in self.query_keys}))
         self._scene_records = {scene_id: scene_records[scene_id] for scene_id in self.scene_ids}
 
@@ -151,7 +163,7 @@ class EgoRecallAnnotations:
             One-based stage assignment, or None for training.
         """
         key = scene_id, query_idx
-        return self._stage_by_key[key]
+        return self._query_stages[self._query_positions[key]]
 
     def get_scene(self, scene_id: str) -> SceneRecord:
         """

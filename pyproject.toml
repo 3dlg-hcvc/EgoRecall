@@ -1,5 +1,5 @@
 [build-system]
-requires = ["setuptools>=68"]
+requires = ["setuptools>=77"]
 build-backend = "setuptools.build_meta"
 
 [project]
@@ -8,10 +8,13 @@ version = "0.1.0"
 description = "Data access for the EgoRecall temporal grounding benchmark"
 readme = "README.md"
 requires-python = ">=3.12"
+license = "MIT"
+license-files = ["LICENSE", "src/scannetpp_common/ATTRIBUTION.md"]
 dependencies = ["pyarrow>=18", "numpy>=1.26", "h5py>=3.11", "pillow>=11", "lz4>=4"]
 
 [project.optional-dependencies]
 dev = ["pytest>=8", "ruff>=0.11"]
+hub = ["datasets>=4", "huggingface_hub>=1"]
 
 [project.scripts]
 egorecall-prepare = "egorecall.cli.prepare_scannetpp:main"

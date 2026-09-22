@@ -12,9 +12,10 @@ import pyarrow as pa
 import pyarrow.parquet as pq
 
 from egorecall.arguments import require_integer, require_text
-from egorecall.data.records import QueryRecord, SceneRecord, decode_program
+from egorecall.data.records import QueryRecord, SceneRecord, SplitManifest, decode_program
 from egorecall.data.schema import FRAME_SCHEMA, QUERY_SCHEMA, STAGE_SCHEMA
 from egorecall.integrity import relative_file
+from egorecall.validation.manifest import manifest_splits
 from egorecall.validation.records import is_program, validate_annotations, validate_scene, validate_table
 
 
@@ -70,28 +71,21 @@ def _query_keys(table: pa.Table, split: str, name: str) -> list[tuple[str, int]]
     return query_keys
 
 
-def validate_annotation_package(dataset_root: Path) -> None:
+def validate_annotation_package(dataset_root: Path) -> dict[str, dict[str, int]]:
     """
-    Validate all annotation contents independently of file checksums. This checks
-    the full split, including queries outside any later stage selection.
+    Check all query, stage, frame, and visibility records against the scene metadata
+    and manifest counts. This covers every stored query, regardless of the stages a
+    reader selects. File checksums are checked separately by verify_package().
 
     Args:
         dataset_root: Directory containing manifest.json, tables, and scene annotations.
+
+    Returns:
+        Observed counts for each checked split.
     """
     with (dataset_root / "manifest.json").open(encoding="utf-8") as stream:
         manifest = json.load(stream)
-    version = require_integer(manifest["schema_version"], "manifest/schema_version", minimum=1)
-    if version != 1:
-        raise ValueError(f"Unsupported package schema_version: {version}.")
-    selection = manifest["selection"]
-    if not isinstance(selection, dict):
-        raise ValueError("manifest/selection must contain a JSON object.")
-    split = selection["split"]
-    if split not in ("train", "val", "test"):
-        raise ValueError(f"Unknown split {split!r}.")
-    counts = manifest["counts"]
-    if not isinstance(counts, dict):
-        raise ValueError("manifest/counts must contain a JSON object.")
+    split_manifests = manifest_splits(manifest)
 
     # Scene records define the expected number of frames, queries, and objects.
     with (dataset_root / "scenes.json").open(encoding="utf-8") as stream:
@@ -104,11 +98,44 @@ def validate_annotation_package(dataset_root: Path) -> None:
         scene_id = scene_record["scene_id"]
         if scene_id in scene_records:
             raise ValueError(f"Duplicate scene metadata: {scene_id}.")
-        if scene_record["split"] != split:
+        if scene_record["split"] not in split_manifests:
             raise ValueError("Manifest selection does not match the scene split.")
         relative_file(dataset_root, scene_record["annotations"])
         scene_records[scene_id] = scene_record
 
+    # Check each split independently before comparing their combined counts with the manifest.
+    split_counts = {}
+    for split, split_manifest in split_manifests.items():
+        selected_records = {
+            scene_id: scene_record for scene_id, scene_record in scene_records.items() if scene_record["split"] == split
+        }
+        split_counts[split] = _validate_split(dataset_root, split, selected_records, split_manifest)
+
+    if manifest["schema_version"] == 2:
+        for name in ("queries", "stage_assignments", "frames", "scenes", "objects", "any_target_queries"):
+            observed = sum(counts[name] for counts in split_counts.values())
+            declared = require_integer(manifest["counts"][name], f"manifest/counts/{name}")
+            if declared != observed:
+                raise ValueError(f"manifest/counts/{name}: declared {declared}, found {observed}.")
+    return split_counts
+
+
+def _validate_split(
+    dataset_root: Path, split: str, scene_records: dict[str, SceneRecord], split_manifest: SplitManifest
+) -> dict[str, int]:
+    """
+    Check one split's IDs, answers, stage assignments, frame names, and visibility files.
+
+    Args:
+        dataset_root: Annotation package directory.
+        split: Split whose tables are checked.
+        scene_records: Scene metadata belonging to this split.
+        split_manifest: Expected counts and stage bounds.
+
+    Returns:
+        Counts computed from this split's actual contents.
+    """
+    counts = split_manifest["counts"]
     query_table = pq.read_table(dataset_root / "queries" / f"{split}.parquet")
     validate_table(query_table, QUERY_SCHEMA, "queries")
     query_keys = _query_keys(query_table, split, "queries")
@@ -135,8 +162,8 @@ def validate_annotation_package(dataset_root: Path) -> None:
         stage_values = stage_table["stage"].to_pylist()
         for stage in stage_values:
             require_integer(stage, "stages/stage", minimum=1)
-        first = require_integer(selection["stage_from"], "manifest/stage_from", minimum=1)
-        last = require_integer(selection["stage_to"], "manifest/stage_to", minimum=first)
+        first = require_integer(split_manifest["stages"]["first"], "manifest/stage_from", minimum=1)
+        last = require_integer(split_manifest["stages"]["last"], "manifest/stage_to", minimum=first)
         available = sorted(set(stage_values))
         if len(available) != last - first + 1 or available[0] != first or available[-1] != last:
             raise ValueError("Packaged stages disagree with the range declared in manifest.json.")
@@ -146,7 +173,7 @@ def validate_annotation_package(dataset_root: Path) -> None:
     validate_table(frame_table, FRAME_SCHEMA, "frames")
     validate_frame_mapping(frame_table, scene_records)
 
-    # Collect answer IDs so visibility files can be checked for every target, not just queried scenes.
+    # Collect each scene's answer IDs to check that every target has a visibility record.
     target_ids: dict[str, set[int]] = defaultdict(set)
     any_target_count = 0
     for batch in query_table.to_batches(max_chunksize=8192):
@@ -177,6 +204,8 @@ def validate_annotation_package(dataset_root: Path) -> None:
         declared = require_integer(counts[name], f"manifest/counts/{name}")
         if declared != actual:
             raise ValueError(f"manifest/counts/{name}: declared {declared}, found {actual}.")
+
+    return observed
 
 
 def validate_query(query: QueryRecord, scene_record: SceneRecord) -> None:

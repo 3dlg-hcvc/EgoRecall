@@ -146,7 +146,7 @@ class QuerySample:
 @dataclass(frozen=True)
 class SceneSupervision:
     """
-    Full-scene ground truth for generation, inspection, or evaluation.
+    Full-scene ground truth for inspection or evaluation.
 
     Args:
         annotations: Filtered object visibility over the complete timeline.
@@ -219,7 +219,7 @@ class EgoRecallScene:
         object IDs. This includes future visibility and must not be passed to methods.
 
         Returns:
-            Scene annotations and explicit source/filtered object populations.
+            Scene visibility records, all source objects, and the subset retained by the visibility filter.
         """
         scene_annotations = self._annotation_reader.get_annotations(self.scene_id)
         source_objects = self._scene_h5.objects()

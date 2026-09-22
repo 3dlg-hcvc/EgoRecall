@@ -18,11 +18,7 @@ observation access with separate ground-truth supervision.
 | `src/scannetpp_common/` | Attributed ScanNet++ toolkit adaptations |
 | `tests/` | Data, preparation, validation, and integration tests with shared fixtures |
 | `examples/` | Small examples using the public API |
-
-The `datagen/`, `dsl/`, `features/`, `evaluation/`, `baselines/`, and `packaging/`
-packages reserve locations for those workflows and currently contain empty
-initializers. Configuration subdirectories, `docs/`, `scripts/`, and
-`third_party/` are also reserved; the base environment is defined in `environment.yml`.
+| `docs/` | GitHub Pages project website |
 
 ## Install
 
@@ -44,6 +40,21 @@ activate it, and repeat the editable installation above.
 When installing through pip in another Python 3.12 environment, install FFmpeg
 6 or newer separately and ensure `ffmpeg` is on `PATH`. `egorecall-prepare`
 also accepts `--ffmpeg /path/to/ffmpeg`.
+
+## Download annotations
+
+Request access at [3dlg-hcvc/EgoRecall](https://huggingface.co/datasets/3dlg-hcvc/EgoRecall).
+After approval, install the optional Hub tools and authenticate:
+
+```bash
+python -m pip install --no-build-isolation -e ".[hub]"
+hf auth login
+hf download 3dlg-hcvc/EgoRecall --repo-type dataset --local-dir /path/to/EgoRecall_hf
+```
+
+This downloads queries, answers, frame mappings, and object visibility annotations.
+Obtain ScanNet++ v2 separately for the observations and geometry used below.
+The data-access package does not include baseline runners or the official scorer.
 
 ## Configure paths
 
@@ -87,7 +98,6 @@ Readers assume the inputs have been checked. They do not repeat schema, count,
 geometry, or checksum audits while loading queries and frames. Missing files,
 keys, and out-of-range accesses raise at the operation that uses them. Run the
 checker again after replacing or modifying annotation, source, or cache files.
-There is no validation marker or automatic check on subsequent reads.
 
 ## Read annotations
 
@@ -137,6 +147,8 @@ processing; dictionaries are produced in bounded batches by `iter_queries()`.
   before stage filtering. `get_query()` and `stage_for()` only accept keys
   in the reader's selection.
 
+Stage selection filters the query Parquet read by scene/query IDs, so a small
+selection does not first create Python records for the full split.
 The reader preserves query-table order. Frame mappings are ordered by their
 explicit `frame_idx`, even if the frame table's storage order changes.
 
@@ -164,8 +176,8 @@ scene counts, frame numbers, query programs and answers, and every scene's objec
 visibility file. It also checks the file checksums listed in the manifest.
 The readers load these same files without repeating the checks.
 
-The supported data directory contains one split. Its manifest declares the split,
-counts, and stage range for validation/test data.
+The dataset directory contains train, val, and test splits. Its schema-2
+manifest declares per-split counts and stage ranges, plus aggregate counts.
 
 `counts.stage_assignments` counts rows in the stage-assignment table, with one
 assignment per validation/test query and zero for unstaged training. For example,
@@ -249,10 +261,9 @@ FFmpeg's temporary image files use the system temporary directory (configurable
 with `TMPDIR`); the temporary H5 is built beside its destination for atomic
 publication. Allow temporary space for one scene's selected images.
 
-Scene caches use schema version 2. Earlier caches without object geometry must
-be recreated in a new cache directory with the current preparation command.
-Normal dataset access uses the EgoRecall annotation package and this prepared
-cache; `scannetpp_root` can be omitted after preparation.
+Scene caches use schema version 2 and include object geometry. Normal dataset
+access uses the EgoRecall annotation package and this prepared cache;
+`scannetpp_root` can be omitted after preparation.
 
 To prepare observations without an EgoRecall annotation package, supply the
 scene IDs and sampling stride:
@@ -313,9 +324,9 @@ loaded when supervision is requested.
 
 Pass the `QuerySample` to a method. Its query contains only `scene_id`, `query_idx`,
 `description`, and `frame`; its observation window includes frame zero through
-the query frame. Negative, noninteger, and future-frame indices raise errors.
+the query frame. Noninteger indices and indices outside that window raise errors.
 Negative indices count backward from the query frame: `frame(-1)` is the query
-frame, not the last frame of the full scene. The window can be iterated, or accessed as encoded images with
+frame. The window can be iterated, or accessed as encoded images with
 `sample.observations.encoded_image(frame_idx, "rgb")`. Keep the scene context open
 while using its windows; closing it closes the HDF5 handle.
 
@@ -328,8 +339,8 @@ values alongside decoded RGB, depth, and masks.
 
 `scene_data.supervision` reads visibility histories and cached object boxes on first
 access and retains them for that scene context. `source_objects` contains every ScanNet++
-object; `filtered_objects` contains the EgoRecall visibility-filtered population,
-selected by the object IDs in the visibility annotations. These are ground truth and include
+object in the scene; `filtered_objects` contains the subset whose IDs appear
+in the visibility annotations. These are ground truth and include
 information unavailable at query time. Observations, answers, and supervision
 all work without a configured or accessible raw ScanNet++ directory after preparation.
 
@@ -390,7 +401,7 @@ ruff format --check .
 ```
 
 Synthetic fixtures exercise selection, source decoding, cache reuse/integrity,
-object joins, and observation cutoffs without a dataset download. FFmpeg from the
+matching object IDs/labels, and observation cutoffs without a dataset download. FFmpeg from the
 active environment is required. To also check the reader against a local dataset, run:
 
 ```bash
@@ -402,3 +413,12 @@ Docstrings start with a plain descriptive paragraph followed by `Args` and
 `Returns` where applicable, without a `Description:` heading. Required data uses
 direct access and hard errors; defaults are reserved for genuinely optional
 settings and documented behavior.
+
+## Licenses
+
+Original EgoRecall code is distributed under the [MIT license](LICENSE),
+Copyright (c) 2026 3dlg-hcvc. ScanNet++ toolkit adaptations are identified in
+[their attribution file](src/scannetpp_common/ATTRIBUTION.md). EgoRecall dataset
+annotations use CC BY-NC 4.0 as stated in the dataset's own license and card.
+For code, dataset, or access questions, use
+[GitHub Issues](https://github.com/3dlg-hcvc/EgoRecall/issues).

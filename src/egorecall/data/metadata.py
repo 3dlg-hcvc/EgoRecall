@@ -74,20 +74,24 @@ def index_frame_names(frame_table: pa.Table, scene_records: dict[str, SceneRecor
     }
 
 
-def read_scene_records(dataset_root: Path, split: str) -> dict[str, SceneRecord]:
+def read_scene_records(dataset_root: Path, split: str | None = None) -> dict[str, SceneRecord]:
     """
-    Read sampling settings and counts for the scenes in one split.
+    Read sampling settings and counts for all scenes or one requested split.
 
     Args:
         dataset_root: Directory containing scenes.json.
-        split: Benchmark split to select.
+        split: Benchmark split to select, or None for every scene in the package.
 
     Returns:
         Records from scenes.json keyed by scene ID.
     """
     with (dataset_root / "scenes.json").open(encoding="utf-8") as stream:
         scene_records = cast(list[SceneRecord], json.load(stream))
-    return {scene_record["scene_id"]: scene_record for scene_record in scene_records if scene_record["split"] == split}
+    return {
+        scene_record["scene_id"]: scene_record
+        for scene_record in scene_records
+        if split is None or scene_record["split"] == split
+    }
 
 
 def load_scene_metadata(

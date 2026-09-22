@@ -4,7 +4,7 @@ channels:
 dependencies:
   - python=3.12
   - pip
-  - setuptools>=68
+  - setuptools>=77
   - pyarrow>=18
   - numpy>=1.26
   - h5py>=3.11

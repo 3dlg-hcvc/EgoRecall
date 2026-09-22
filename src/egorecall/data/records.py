@@ -101,6 +101,25 @@ class SceneAnnotations(TypedDict):
     objects: dict[str, ObjectAnnotation]
 
 
+class StageBounds(TypedDict):
+    """
+    Inclusive stage range for a validation or test split.
+    """
+
+    first: int
+    last: int
+
+
+class SplitManifest(TypedDict):
+    """
+    Counts of queries, assignments, scenes, frames, and objects for one split.
+    stages gives its inclusive first/last stage range, or None for training.
+    """
+
+    counts: dict[str, int]
+    stages: StageBounds | None
+
+
 def decode_program(program_json: str) -> Program:
     """
     Decode program_json into nested lists of operator names and arguments.
