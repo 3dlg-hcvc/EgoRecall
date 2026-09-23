@@ -63,7 +63,7 @@ class EgoRecallAnnotations:
         if split != "train":
             stage_table = pq.read_table(self.root / "stages" / f"{split}.parquet")
             self.available_stages = tuple(sorted(pc.unique(stage_table["stage"]).to_pylist()))
-            
+
             if self.stage_range is not None:
                 require_stage_range(self.stage_range, self.available_stages)
                 stage_table = stage_table.filter(
@@ -72,9 +72,9 @@ class EgoRecallAnnotations:
                         pc.less_equal(stage_table["stage"], self.stage_range.last),
                     )
                 )
-            
+
             stage_by_key = {(row["scene_id"], row["query_idx"]): row["stage"] for row in stage_table.to_pylist()}
-            
+
             if self.stage_range is not None:
                 # Match scene/query pairs because query_idx values can repeat across scenes.
                 query_ids_by_scene: dict[str, list[int]] = {}

@@ -1,8 +1,6 @@
 {
   "schema_version": 1,
-  "description": "Frozen scene assignment used for the EgoRecall benchmark; retain it when reproducing generation.",
-  "source_sha256": "a887b3555c3f8ed3675dae35dcc05edfed676eda544c27d73a8fb110a2e65370",
-  "seed": 42,
+  "description": "Benchmark split (train, val, or test) of each ScanNet++ scene in EgoRecall. The dataset's scenes.json records the same assignment.",
   "split_counts": {
     "train": 100,
     "val": 13,
