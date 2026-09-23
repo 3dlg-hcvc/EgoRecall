@@ -284,30 +284,34 @@ def test_annotation_path_cannot_escape_package(package_root: Path) -> None:
 @pytest.mark.parametrize(
     ("section", "key"),
     [
-        (None, "schema_version"),
-        (None, "selection"),
-        (None, "counts"),
-        ("selection", "split"),
-        ("selection", "stage_from"),
-        ("selection", "stage_to"),
-        ("counts", "queries"),
-        ("counts", "stage_assignments"),
-        ("counts", "frames"),
-        ("counts", "scenes"),
+        ((), "schema_version"),
+        ((), "splits"),
+        ((), "counts"),
+        (("splits", "test"), "counts"),
+        (("splits", "test"), "stages"),
+        (("splits", "test", "stages"), "first"),
+        (("splits", "test", "stages"), "last"),
+        (("splits", "test", "counts"), "queries"),
+        (("splits", "test", "counts"), "stage_assignments"),
+        (("splits", "test", "counts"), "frames"),
+        (("splits", "test", "counts"), "scenes"),
+        (("counts",), "queries"),
     ],
 )
-def test_required_manifest_fields_fail_when_missing(package_root: Path, section: str | None, key: str) -> None:
+def test_required_manifest_fields_fail_when_missing(package_root: Path, section: tuple[str, ...], key: str) -> None:
     """
     Raise KeyError when a required manifest field is missing.
 
     Args:
         package_root: Synthetic package to corrupt.
-        section: Nested manifest object, or None for the root object.
+        section: Keys leading from the manifest root to the object that loses a field.
         key: Required field to remove.
     """
     path = package_root / "manifest.json"
     manifest = json.loads(path.read_text())
-    record = manifest if section is None else manifest[section]
+    record = manifest
+    for name in section:
+        record = record[name]
     del record[key]
     path.write_text(json.dumps(manifest))
 
@@ -315,11 +319,27 @@ def test_required_manifest_fields_fail_when_missing(package_root: Path, section:
         validate_annotation_package(package_root)
 
 
-@pytest.mark.parametrize("section", ["selection", "counts"])
+def test_unsupported_manifest_schema_fails(package_root: Path) -> None:
+    """
+    Reject a manifest whose schema_version is not 2, the only supported layout.
+
+    Args:
+        package_root: Package whose manifest will declare schema version 1.
+    """
+    path = package_root / "manifest.json"
+    manifest = json.loads(path.read_text())
+    manifest["schema_version"] = 1
+    path.write_text(json.dumps(manifest))
+
+    with pytest.raises(ValueError, match="Unsupported package schema_version: 1"):
+        validate_annotation_package(package_root)
+
+
+@pytest.mark.parametrize("section", ["splits", "counts"])
 @pytest.mark.parametrize("value", [None, []])
 def test_malformed_manifest_records_fail(package_root: Path, section: str, value: list[object] | None) -> None:
     """
-    Reject selection and counts sections that are not JSON objects.
+    Reject splits and counts sections that are not JSON objects.
 
     Args:
         package_root: Synthetic package to corrupt.
@@ -337,17 +357,17 @@ def test_malformed_manifest_records_fail(package_root: Path, section: str, value
 
 def test_manifest_split_mismatch_fails(package_root: Path) -> None:
     """
-    Reject a manifest split that disagrees with the requested split.
+    Reject a manifest that does not list the split assigned to scenes in scenes.json.
 
     Args:
-        package_root: Test package whose manifest will incorrectly declare val.
+        package_root: Test package whose manifest will list val instead of test.
     """
     path = package_root / "manifest.json"
     manifest = json.loads(path.read_text())
-    manifest["selection"]["split"] = "val"
+    manifest["splits"] = {"val": manifest["splits"]["test"]}
     path.write_text(json.dumps(manifest))
 
-    with pytest.raises(ValueError, match="Manifest selection does not match"):
+    with pytest.raises(ValueError, match="is not listed in manifest.json"):
         validate_annotation_package(package_root)
 
 

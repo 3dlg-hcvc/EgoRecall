@@ -50,19 +50,19 @@ def test_checker_source_cache_and_package(package_root: Path, raw_root: Path, pr
 @pytest.mark.parametrize("name", ["objects", "any_target_queries"])
 def test_checker_annotation_counts_fail(package_root: Path, name: str) -> None:
     """
-    Compare manifest supervision totals with actual annotations and query values.
+    Compare a split's declared supervision counts with its actual annotations and query values.
 
     Args:
         package_root: Synthetic annotation package.
-        name: Manifest total to corrupt.
+        name: Test-split count to corrupt.
     """
     _add_manifest_hashes(package_root)
     path = package_root / "manifest.json"
     manifest = json.loads(path.read_text())
-    manifest["counts"][name] += 1
+    manifest["splits"]["test"]["counts"][name] += 1
     path.write_text(json.dumps(manifest))
 
-    with pytest.raises(ValueError, match=f"manifest/counts/{name}"):
+    with pytest.raises(ValueError, match=f"manifest/splits/test/counts/{name}"):
         check_dataset(DatasetPaths(package_root))
 
 

@@ -10,8 +10,8 @@ from egorecall.data.records import SplitManifest
 
 def manifest_splits(manifest: dict[str, object]) -> dict[str, SplitManifest]:
     """
-    Check split names and stage ranges, then return each split's counts and range.
-    Schema 1 stores one split under selection; schema 2 uses a splits mapping.
+    Check the splits mapping in manifest.json, then return each split's counts and stage range.
+    The manifest lists each split under splits and the whole dataset's totals under counts.
 
     Args:
         manifest: JSON object read from manifest.json.
@@ -21,28 +21,20 @@ def manifest_splits(manifest: dict[str, object]) -> dict[str, SplitManifest]:
         first/last stage range. Training records have stages set to None.
     """
     version = require_integer(manifest["schema_version"], "manifest/schema_version", minimum=1)
-    if version == 1:
-        selection = manifest["selection"]
-        if not isinstance(selection, dict):
-            raise ValueError("manifest/selection must contain a JSON object.")
-        split = selection["split"]
-        stages = None if split == "train" else {"first": selection["stage_from"], "last": selection["stage_to"]}
-        splits = {split: {"counts": manifest["counts"], "stages": stages}}
-    elif version == 2:
-        if not isinstance(manifest["counts"], dict):
-            raise ValueError("manifest/counts must contain a JSON object.")
-        splits = manifest["splits"]
-        if not isinstance(splits, dict) or not splits:
-            raise ValueError("manifest/splits must contain a nonempty split mapping.")
-    else:
+    if version != 2:
         raise ValueError(f"Unsupported package schema_version: {version}.")
+    if not isinstance(manifest["counts"], dict):
+        raise ValueError("manifest/counts must contain a JSON object.")
+    splits = manifest["splits"]
+    if not isinstance(splits, dict) or not splits:
+        raise ValueError("manifest/splits must contain a nonempty split mapping.")
 
     # Training has no stage assignments; validation and test need an inclusive stage range.
     for split, split_manifest in splits.items():
         if split not in ("train", "val", "test"):
             raise ValueError(f"Unknown split {split!r}.")
         if not isinstance(split_manifest["counts"], dict):
-            raise ValueError("manifest/counts must contain a JSON object.")
+            raise ValueError(f"manifest/splits/{split}/counts must contain a JSON object.")
         stages = split_manifest["stages"]
         if split == "train":
             if stages is not None:
@@ -50,6 +42,6 @@ def manifest_splits(manifest: dict[str, object]) -> dict[str, SplitManifest]:
         else:
             if not isinstance(stages, dict):
                 raise ValueError(f"{split}: manifest stages must contain first/last bounds.")
-            first = require_integer(stages["first"], "manifest/stage_from", minimum=1)
-            require_integer(stages["last"], "manifest/stage_to", minimum=first)
+            first = require_integer(stages["first"], f"manifest/splits/{split}/stages/first", minimum=1)
+            require_integer(stages["last"], f"manifest/splits/{split}/stages/last", minimum=first)
     return cast(dict[str, SplitManifest], splits)

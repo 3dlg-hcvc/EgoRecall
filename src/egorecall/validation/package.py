@@ -99,7 +99,7 @@ def validate_annotation_package(dataset_root: Path) -> dict[str, dict[str, int]]
         if scene_id in scene_records:
             raise ValueError(f"Duplicate scene metadata: {scene_id}.")
         if scene_record["split"] not in split_manifests:
-            raise ValueError("Manifest selection does not match the scene split.")
+            raise ValueError(f"{scene_id}: split {scene_record['split']!r} is not listed in manifest.json.")
         relative_file(dataset_root, scene_record["annotations"])
         scene_records[scene_id] = scene_record
 
@@ -111,12 +111,11 @@ def validate_annotation_package(dataset_root: Path) -> dict[str, dict[str, int]]
         }
         split_counts[split] = _validate_split(dataset_root, split, selected_records, split_manifest)
 
-    if manifest["schema_version"] == 2:
-        for name in ("queries", "stage_assignments", "frames", "scenes", "objects", "any_target_queries"):
-            observed = sum(counts[name] for counts in split_counts.values())
-            declared = require_integer(manifest["counts"][name], f"manifest/counts/{name}")
-            if declared != observed:
-                raise ValueError(f"manifest/counts/{name}: declared {declared}, found {observed}.")
+    for name in ("queries", "stage_assignments", "frames", "scenes", "objects", "any_target_queries"):
+        observed = sum(counts[name] for counts in split_counts.values())
+        declared = require_integer(manifest["counts"][name], f"manifest/counts/{name}")
+        if declared != observed:
+            raise ValueError(f"manifest/counts/{name}: declared {declared}, found {observed}.")
     return split_counts
 
 
@@ -162,8 +161,8 @@ def _validate_split(
         stage_values = stage_table["stage"].to_pylist()
         for stage in stage_values:
             require_integer(stage, "stages/stage", minimum=1)
-        first = require_integer(split_manifest["stages"]["first"], "manifest/stage_from", minimum=1)
-        last = require_integer(split_manifest["stages"]["last"], "manifest/stage_to", minimum=first)
+        first = require_integer(split_manifest["stages"]["first"], f"manifest/splits/{split}/stages/first", minimum=1)
+        last = require_integer(split_manifest["stages"]["last"], f"manifest/splits/{split}/stages/last", minimum=first)
         available = sorted(set(stage_values))
         if len(available) != last - first + 1 or available[0] != first or available[-1] != last:
             raise ValueError("Packaged stages disagree with the range declared in manifest.json.")
@@ -201,9 +200,9 @@ def _validate_split(
         any_target_queries=any_target_count,
     )
     for name, actual in observed.items():
-        declared = require_integer(counts[name], f"manifest/counts/{name}")
+        declared = require_integer(counts[name], f"manifest/splits/{split}/counts/{name}")
         if declared != actual:
-            raise ValueError(f"manifest/counts/{name}: declared {declared}, found {actual}.")
+            raise ValueError(f"manifest/splits/{split}/counts/{name}: declared {declared}, found {actual}.")
 
     return observed
 

@@ -31,12 +31,7 @@ def local_annotations() -> EgoRecallAnnotations:
 
     root = Path(location)
     manifest = json.loads((root / "manifest.json").read_text())
-    if manifest["schema_version"] == 1:
-        split = manifest["selection"]["split"]
-    elif manifest["schema_version"] == 2:
-        split = "test" if "test" in manifest["splits"] else next(iter(manifest["splits"]))
-    else:
-        raise ValueError("Unsupported integration fixture manifest.")
+    split = "test" if "test" in manifest["splits"] else next(iter(manifest["splits"]))
     return EgoRecallAnnotations(root, split=split)
 
 

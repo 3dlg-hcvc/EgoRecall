@@ -31,7 +31,7 @@ def full_package(package_root: Path) -> Path:
     """
     scene_records = json.loads((package_root / "scenes.json").read_text())
     all_scene_records = list(scene_records)
-    test_counts = json.loads((package_root / "manifest.json").read_text())["counts"]
+    test_counts = json.loads((package_root / "manifest.json").read_text())["splits"]["test"]["counts"]
     splits = {"test": {"counts": test_counts, "stages": {"first": 1, "last": 3}}}
 
     # Use distinct scene IDs in each split while preserving the query and frame indices.

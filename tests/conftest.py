@@ -123,23 +123,20 @@ def package_root(tmp_path: Path, request: pytest.FixtureRequest) -> Path:
         }
         (root / "annotations" / f"{scene_id}.json.gz").write_bytes(gzip.compress(json.dumps(annotation).encode()))
 
-    # Summarize the scene inventory and table counts after writing all payloads.
+    # Summarize the scene inventory and table counts after writing all payloads. The package
+    # has one split, so the dataset totals equal that split's counts.
     (root / "scenes.json").write_text(json.dumps(scenes))
+    counts = {
+        "queries": 4,
+        "stage_assignments": 0 if split == "train" else 4,
+        "frames": 6,
+        "scenes": 2,
+        "objects": 4,
+        "any_target_queries": 0,
+    }
+    stages = None if split == "train" else {"first": 1, "last": 3}
     (root / "manifest.json").write_text(
-        json.dumps(
-            {
-                "schema_version": 1,
-                "selection": {"split": split, "stage_from": 1, "stage_to": 3},
-                "counts": {
-                    "queries": 4,
-                    "stage_assignments": 0 if split == "train" else 4,
-                    "frames": 6,
-                    "scenes": 2,
-                    "objects": 4,
-                    "any_target_queries": 0,
-                },
-            }
-        )
+        json.dumps({"schema_version": 2, "splits": {split: {"counts": counts, "stages": stages}}, "counts": counts})
     )
     return root
 
