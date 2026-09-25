@@ -27,7 +27,8 @@ class CheckReport:
         annotation_scenes: Scene annotation payloads validated.
         source_scenes: Scenes whose ScanNet++ camera and object records were checked.
         cache_scenes: Prepared scene caches checked for compatibility.
-        frames_decoded: Cached RGB-D observations fully decoded and checksummed.
+        frames_decoded: Cached frames whose RGB, depth, and mask images were fully decoded; every cached image
+            is checksummed either way.
     """
 
     files_verified: int
@@ -50,8 +51,9 @@ def check_dataset(
 ) -> CheckReport:
     """
     Check all EgoRecall annotations and optionally their ScanNet++ source files and prepared H5 caches.
-    A split, stage, or scene selection limits source/cache work and chooses scenes the same way as
-    egorecall-prepare; package integrity still covers every manifest file and all query/annotation records.
+    A split, stage, or scene selection limits only the source/cache work. With a split, scenes are chosen as
+    egorecall-prepare chooses them; without one, scene IDs are looked up across every split. Package
+    integrity still covers every manifest file and all query/annotation records.
 
     Args:
         paths: Configured dataset locations.
@@ -60,7 +62,8 @@ def check_dataset(
         scene_ids: Optional source/cache scene subset, taken from the split and stage selection when one is given.
         check_source: Check source cameras and boxes, and compare frame names and object IDs/labels with annotations.
         check_cache: Require and validate a prepared cache for each selected scene.
-        decode_all: Decode every cached frame; otherwise check the first and last.
+        decode_all: Decode every cached frame; otherwise decode only the first and last. Every frame's
+            checksum and image header are checked either way.
 
     Returns:
         Counts for package, source, cache, and decoded-frame checks.
@@ -82,7 +85,7 @@ def check_dataset(
     files_verified = verify_package(paths.dataset_root)
     split_counts = validate_annotation_package(paths.dataset_root)
 
-    # Select scenes as preparation does: from one split and its stages, or by scene ID across every split.
+    # Select scenes from one split and its stages, as preparation does, or by scene ID across every split.
     requested_by_split: dict[str, list[str] | None] = {}
     if split is not None:
         requested_by_split[split] = scene_ids

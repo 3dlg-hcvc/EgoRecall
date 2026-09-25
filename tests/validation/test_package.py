@@ -312,3 +312,136 @@ def test_frame_names_must_be_increasing_source_names(package_root: Path, change:
 
     with pytest.raises(ValueError, match=message):
         validate_annotation_package(package_root)
+
+
+@pytest.mark.parametrize(
+    ("change", "message"),
+    [
+        ("emit_reason", "unknown emit_reason"),
+        ("duplicate_target", "duplicate object IDs in target_oids"),
+        ("overlapping_targets", "do not partition the target IDs"),
+        ("program_operand", "invalid program_json"),
+        ("program_text", "invalid program_json"),
+        ("description", "description: expected a nonempty string"),
+    ],
+)
+def test_invalid_query_records_fail(package_root: Path, change: str, message: str) -> None:
+    """
+    Reject query rows with an unknown emission reason, repeated or overlapping target IDs, a malformed
+    program, or a blank description, although the table schema is correct.
+
+    Args:
+        package_root: Package whose first query row will be changed.
+        change: Invalid value to introduce.
+        message: Expected error text.
+    """
+    path = package_root / "queries/test.parquet"
+    table = pq.read_table(path)
+    rows = table.to_pylist()
+    query = rows[0]
+    if change == "emit_reason":
+        query["emit_reason"] = "repeat"
+    elif change == "duplicate_target":
+        query["target_oids"] = [1, 1]
+    elif change == "overlapping_targets":
+        query["hidden_target_oids"] = [1]
+    elif change == "program_operand":
+        query["program_json"] = json.dumps(["first_seen", True])
+    elif change == "program_text":
+        query["program_json"] = "first_seen chair"
+    else:
+        query["description"] = "   "
+    pq.write_table(pa.Table.from_pylist(rows, schema=table.schema), path)
+
+    with pytest.raises(ValueError, match=message):
+        validate_annotation_package(package_root)
+
+
+@pytest.mark.parametrize(
+    ("change", "message"),
+    [
+        ("schema_version", "unsupported annotation schema_version"),
+        ("num_frames", "annotation scene or timeline does not match"),
+        ("object_count", "object count does not match"),
+        ("object_id", "invalid annotation object ID"),
+        ("missing_field", "expected fields"),
+        ("summary_frame", "frame outside the sampled frame sequence"),
+        ("visible_frames", "exceeds the scene length"),
+        ("segment", "invalid visibility segment bounds"),
+        ("observation_frame", "observation frame outside"),
+        ("fraction", "finite, nonnegative number"),
+    ],
+)
+def test_invalid_scene_annotations_fail(package_root: Path, change: str, message: str) -> None:
+    """
+    Reject visibility files whose structure, object IDs, or frame references disagree with scenes.json
+    or fall outside the scene's sampled frames.
+
+    Args:
+        package_root: Package whose scene_a visibility file will be changed.
+        change: Invalid value to introduce.
+        message: Expected error text.
+    """
+    path = package_root / "annotations/scene_a.json.gz"
+    scene_annotations = json.loads(gzip.decompress(path.read_bytes()))
+    chair = scene_annotations["objects"]["1"]
+    if change == "schema_version":
+        scene_annotations["schema_version"] = 2
+    elif change == "num_frames":
+        scene_annotations["num_frames"] = 4
+    elif change == "object_count":
+        scene_annotations["objects"]["3"] = chair
+    elif change == "object_id":
+        scene_annotations["objects"]["01"] = scene_annotations["objects"].pop("1")
+    elif change == "missing_field":
+        del chair["label"]
+    elif change == "summary_frame":
+        chair["temporal"]["last_seen_frame"] = 3
+    elif change == "visible_frames":
+        chair["temporal"]["total_visible_frames"] = 4
+    elif change == "segment":
+        chair["visibility_segments"] = [[1, 0]]
+    elif change == "observation_frame":
+        chair["per_frame"]["3"] = chair["per_frame"]["0"]
+    else:
+        chair["per_frame"]["0"]["visible_area_frac"] = -0.1
+    path.write_bytes(gzip.compress(json.dumps(scene_annotations).encode()))
+
+    with pytest.raises(ValueError, match=message):
+        validate_annotation_package(package_root)
+
+
+@pytest.mark.parametrize(
+    ("change", "message"),
+    [
+        ("query_count", "row counts disagree with scenes.json"),
+        ("duplicate_scene", "Duplicate scene metadata"),
+        ("unknown_split", "Unknown split 'dev'"),
+    ],
+)
+def test_inconsistent_package_structure_fails(package_root: Path, change: str, message: str) -> None:
+    """
+    Reject a scene query count that disagrees with the query table, a repeated scene record,
+    and a manifest split other than train, val, or test.
+
+    Args:
+        package_root: Package whose scenes.json or manifest.json will be changed.
+        change: Inconsistency to introduce.
+        message: Expected error text.
+    """
+    if change == "unknown_split":
+        path = package_root / "manifest.json"
+        manifest = json.loads(path.read_text())
+        manifest["splits"]["dev"] = manifest["splits"]["test"]
+        path.write_text(json.dumps(manifest))
+    else:
+        path = package_root / "scenes.json"
+        scenes = json.loads(path.read_text())
+        if change == "query_count":
+            scenes[0]["num_queries"] = 2
+        else:
+            scenes.append(scenes[0])
+        path.write_text(json.dumps(scenes))
+
+    with pytest.raises(ValueError, match=message):
+        validate_annotation_package(package_root)

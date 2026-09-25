@@ -24,7 +24,7 @@ from egorecall.data.scene_h5 import (
 )
 from egorecall.geometry import ObjectGeometry
 from egorecall.preparation.depth import iter_depth_frames
-from egorecall.preparation.video import extract_video_frames
+from egorecall.preparation.video import extract_video_frames, require_ffmpeg
 
 
 def prepare_scene(
@@ -62,6 +62,9 @@ def prepare_scene(
     output_path = cache_root / f"{source_scene.scene_id}.h5"
     if output_path.exists():
         return output_path
+
+    # Check FFmpeg first, so an old installation fails before the source files are read and hashed.
+    require_ffmpeg(ffmpeg)
 
     # Read source cameras and boxes once; the checker compares them with annotations.
     camera_sequence = source_scene.cameras(subsample_factor, frame_names=frame_names)

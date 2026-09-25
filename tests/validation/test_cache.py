@@ -6,11 +6,13 @@ import json
 from pathlib import Path
 
 import h5py
+import numpy as np
 import pytest
 
 from egorecall import DatasetPaths
 from egorecall.data.scannetpp import ScanNetPPScene
-from egorecall.data.scene_h5 import CACHE_VERSION, SceneH5, object_geometry_sha256
+from egorecall.data.scene_h5 import CACHE_VERSION, SceneH5, camera_sha256, object_geometry_sha256
+from egorecall.geometry import CameraSequence
 from egorecall.integrity import fingerprint_file
 from egorecall.validation.cache import validate_cache_compatibility, validate_scene_cache
 from egorecall.validation.check import check_dataset, check_source_scenes
@@ -220,3 +222,79 @@ def test_cache_mismatch_names_the_setting(prepared_cache: Path, setting: str, va
 
         with pytest.raises(ValueError, match=message):
             validate_cache_compatibility(h5_file, **{**expected, setting: value})
+
+
+def test_cache_cameras_are_compared_with_source(package_root: Path, raw_root: Path, prepared_cache: Path) -> None:
+    """
+    Explicit source checking detects a changed camera pose even in a cache with a valid camera checksum.
+
+    Args:
+        package_root: Annotation package for the cached scene.
+        raw_root: Original source cameras.
+        prepared_cache: Cache whose first pose will be changed consistently with its checksum.
+    """
+    with h5py.File(prepared_cache / "scene_a.h5", "r+") as cache:
+        cache["camera/aligned_pose"][0, 0, 3] += 0.5
+        cameras = CameraSequence(
+            tuple(cache["frames/names"].asstr()[:]),
+            cache["camera/aligned_pose"][:],
+            cache["camera/intrinsic"][:],
+            cache["camera/timestamp"][:],
+            (32, 24),
+        )
+        cache["camera"].attrs["sha256"] = camera_sha256(cameras)
+
+    add_manifest_hashes(package_root)
+    paths = DatasetPaths(package_root, raw_root, prepared_cache)
+    assert check_dataset(paths, scene_ids=["scene_a"], check_cache=True).cache_scenes == 1
+    with pytest.raises(ValueError, match="cached camera values differ from the source"):
+        check_dataset(paths, scene_ids=["scene_a"], check_cache=True, check_source=True)
+
+
+@pytest.mark.parametrize(
+    ("change", "message"),
+    [
+        ("source_fps", "finite and positive"),
+        ("depth_resolution", "Invalid cache depth_resolution"),
+        ("fingerprints", "must contain source fingerprints"),
+        ("digest", "invalid source SHA-256 digest"),
+        ("camera_dtype", "expected float64 values"),
+        ("image_count", "image count does not match"),
+        ("object_id_dtype", "one-dimensional int64 array"),
+    ],
+)
+def test_invalid_cache_structure_fails(prepared_cache: Path, change: str, message: str) -> None:
+    """
+    Reject cache attributes and datasets whose values, types, or sizes do not follow the cache layout.
+
+    Args:
+        prepared_cache: Cache to change.
+        change: Attribute or dataset to make invalid.
+        message: Expected error text.
+    """
+    path = prepared_cache / "scene_a.h5"
+    with h5py.File(path, "r+") as cache:
+        if change == "source_fps":
+            cache.attrs["source_fps"] = 0.0
+        elif change == "depth_resolution":
+            cache.attrs["depth_resolution"] = (128, 96)
+        elif change == "fingerprints":
+            cache.attrs["source_files"] = "{}"
+        elif change == "digest":
+            fingerprints = json.loads(cache.attrs["source_files"])
+            fingerprints["iphone/exif.json"]["sha256"] = "not-a-digest"
+            cache.attrs["source_files"] = json.dumps(fingerprints)
+        elif change == "camera_dtype":
+            timestamps = cache["camera/timestamp"][:]
+            del cache["camera/timestamp"]
+            cache.create_dataset("camera/timestamp", data=timestamps.astype(np.float32))
+        elif change == "image_count":
+            del cache["frames/mask_png"]
+            cache.create_dataset("frames/mask_png", (2,), dtype=h5py.vlen_dtype(np.uint8))
+        else:
+            object_ids = cache["objects/object_id"][:]
+            del cache["objects/object_id"]
+            cache.create_dataset("objects/object_id", data=object_ids.astype(np.int32))
+
+    with pytest.raises(ValueError, match=message):
+        validate_scene_cache(path)

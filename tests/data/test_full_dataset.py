@@ -172,3 +172,48 @@ def test_invalid_full_manifest_is_rejected(full_package: Path, change: str) -> N
     path.write_text(json.dumps(manifest))
     with pytest.raises(ValueError):
         validate_annotation_package(full_package)
+
+
+def test_checker_finds_scene_ids_across_splits(
+    full_package: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """
+    Without a split, check each requested scene through the reader for the split it belongs to.
+
+    Args:
+        full_package: Dataset with two scenes per split.
+        tmp_path: Cache location required by cache checks; no cache is opened.
+        monkeypatch: Fixture recording each scene check instead of opening caches.
+    """
+    from egorecall.validation import check
+
+    checked = {}
+
+    def record_scene(
+        paths: DatasetPaths, scene_id: str, subsample_factor: int, source_fps: float, **options: object
+    ) -> int:
+        """
+        Record the frame names passed for a scene instead of checking its files.
+
+        Args:
+            paths: Configured locations.
+            scene_id: Scene to check.
+            subsample_factor: Sampling stride from scenes.json.
+            source_fps: Source frame rate from scenes.json.
+            options: Frame names, visibility annotations, and check flags.
+
+        Returns:
+            Zero decoded frames.
+        """
+        checked[scene_id] = options["frame_names"]
+        return 0
+
+    monkeypatch.setattr(check, "_check_scene_assets", record_scene)
+    report = check_dataset(
+        DatasetPaths(full_package, cache_root=tmp_path), scene_ids=["val_scene_b", "train_scene_a"], check_cache=True
+    )
+    assert report.cache_scenes == 2
+    assert checked == {
+        "train_scene_a": ("frame_000000", "frame_000010", "frame_000020"),
+        "val_scene_b": ("frame_000000", "frame_000010", "frame_000020"),
+    }

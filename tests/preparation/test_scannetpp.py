@@ -16,6 +16,7 @@ from egorecall.data.scannetpp import ScanNetPPScene
 from egorecall.data.scene_h5 import SceneH5
 from egorecall.integrity import fingerprint_file
 from egorecall.preparation.scannetpp import prepare_scene
+from egorecall.preparation.video import require_ffmpeg
 from egorecall.validation.cache import validate_scene_cache
 
 
@@ -214,6 +215,55 @@ def test_publishing_without_hard_links_or_after_another_run(
 
     assert [path.name for path in cache_root.iterdir()] == [output.name] == ["scene_a.h5"]
     assert validate_scene_cache(output, decode_all=True) == 3
+
+
+def write_ffmpeg_stub(path: Path, version_output: str) -> str:
+    """
+    Write an executable that prints fixed version text in place of FFmpeg.
+
+    Args:
+        path: Location of the stand-in executable.
+        version_output: Lines printed for ffmpeg -version.
+
+    Returns:
+        The executable path as a string.
+    """
+    path.write_text("#!/bin/sh\ncat <<'EOF'\n" + version_output + "\nEOF\n")
+    path.chmod(0o755)
+    return str(path)
+
+
+def test_old_ffmpeg_stops_preparation_early(raw_root: Path, tmp_path: Path) -> None:
+    """
+    Stop with the reported version when FFmpeg is older than 6, before any source file is read.
+
+    Args:
+        raw_root: Synthetic source scene.
+        tmp_path: Location of the stand-in FFmpeg and the cache.
+    """
+    ffmpeg = write_ffmpeg_stub(
+        tmp_path / "ffmpeg",
+        "ffmpeg version 4.4.2 Copyright (c) 2000-2021 the FFmpeg developers\nlibavcodec     58.134.100 / 58.134.100",
+    )
+    cache_root = tmp_path / "cache"
+    with pytest.raises(RuntimeError, match="FFmpeg 6 or newer is required; .* reports: ffmpeg version 4.4.2"):
+        prepare_scene(ScanNetPPScene(raw_root, "scene_a"), cache_root, ffmpeg=ffmpeg)
+    assert not cache_root.exists()
+
+
+def test_ffmpeg_development_builds_are_judged_by_library_version(tmp_path: Path) -> None:
+    """
+    Accept a development build, whose version line has no release number, by its libavcodec version.
+
+    Args:
+        tmp_path: Location of the stand-in FFmpeg.
+    """
+    ffmpeg = write_ffmpeg_stub(
+        tmp_path / "ffmpeg",
+        "ffmpeg version N-114032-g1a2b3c4d Copyright (c) 2000-2024 the FFmpeg developers\n"
+        "libavcodec     61. 19.100 / 61. 19.100",
+    )
+    require_ffmpeg(ffmpeg)
 
 
 def test_scene_without_source_objects(raw_root: Path, tmp_path: Path, ffmpeg_path: str) -> None:

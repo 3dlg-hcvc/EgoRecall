@@ -2,10 +2,29 @@
 Extract selected RGB and mask frames from source videos with FFmpeg.
 """
 
+import re
 import subprocess
 from pathlib import Path
 
 from egorecall.data.scannetpp import source_frame_index
+
+# Preparation requires FFmpeg 6 or newer; older releases lack options it uses, such as -fps_mode.
+# FFmpeg 6 ships libavcodec 60, whose version ffmpeg -version prints in release and development builds alike.
+MINIMUM_LIBAVCODEC = 60
+
+
+def require_ffmpeg(ffmpeg: str = "ffmpeg") -> None:
+    """
+    Require FFmpeg 6 or newer, judged by the libavcodec version that ffmpeg -version reports.
+
+    Args:
+        ffmpeg: FFmpeg executable name or path.
+    """
+    result = subprocess.run([ffmpeg, "-version"], check=True, capture_output=True, text=True)
+    match = re.search(r"^libavcodec\s+(\d+)\.", result.stdout, re.MULTILINE)
+    if match is None or int(match.group(1)) < MINIMUM_LIBAVCODEC:
+        version = result.stdout.splitlines()[0] if result.stdout else "no version information"
+        raise RuntimeError(f"FFmpeg 6 or newer is required; {ffmpeg} reports: {version}.")
 
 
 def extract_video_frames(

@@ -220,6 +220,8 @@ class EgoRecallScene:
         """
         Read visibility histories and cached boxes, then select boxes by the annotated
         object IDs. This includes future visibility and must not be passed to methods.
+        The result is read once and kept for this scene, and filtered_objects shares its
+        records with source_objects, so copy values before editing them.
 
         Returns:
             Scene visibility records, all source objects, and the subset retained by the visibility filter.

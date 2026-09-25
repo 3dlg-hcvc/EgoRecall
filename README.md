@@ -378,8 +378,9 @@ egorecall-check --config configs/paths.toml \
   --source --cache --scenes SCENE_ID --decode-all
 ```
 
-`--split`, `--stages`, and `--scenes` limit source/cache work and select scenes as
-`egorecall-prepare` does; the complete annotation package is always checked.
+`--split`, `--stages`, and `--scenes` limit source/cache work. With `--split`, scenes are
+selected as `egorecall-prepare` selects them; `--scenes` alone may name scenes from any
+split. The complete annotation package is always checked.
 `--source` validates source camera alignment, object geometry, and
 object IDs/labels. Together, `--source --cache` additionally compare source
 fingerprints, camera values, and all object geometry against the cache.

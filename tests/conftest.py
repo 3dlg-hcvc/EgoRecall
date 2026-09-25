@@ -151,7 +151,7 @@ def ffmpeg_path() -> str:
     """
     executable = shutil.which("ffmpeg")
     if executable is None:
-        pytest.fail("FFmpeg is required; install the foundation environment before running these tests.")
+        pytest.fail("FFmpeg is required; create the egorecall environment from environment.yml to run these tests.")
     return executable
 
 
@@ -257,7 +257,8 @@ def raw_root(tmp_path: Path, ffmpeg_path: str) -> Path:
 @pytest.fixture
 def prepared_cache(raw_root: Path, package_root: Path, tmp_path: Path, ffmpeg_path: str) -> Path:
     """
-    Prepare the synthetic scene using the package's actual frame mapping.
+    Prepare the synthetic scene with the default stride of 10, which selects the same three
+    frames as the package's frame table.
 
     Args:
         raw_root: Synthetic original-layout source scene.
