@@ -151,9 +151,33 @@ def test_invalid_cached_objects_fail(prepared_cache: Path, change: str) -> None:
         validate_scene_cache(path)
 
 
+@pytest.mark.parametrize("change", ["pose", "intrinsic", "timestamp", "frame_name"])
+def test_changed_cached_cameras_fail(prepared_cache: Path, change: str) -> None:
+    """
+    Detect edited camera values or frame names through the camera checksum, without the raw source.
+
+    Args:
+        prepared_cache: Cache to change.
+        change: Camera field to edit while keeping its values structurally valid.
+    """
+    path = prepared_cache / "scene_a.h5"
+    with h5py.File(path, "r+") as cache:
+        if change == "pose":
+            cache["camera/aligned_pose"][0, 0, 3] += 0.5
+        elif change == "intrinsic":
+            cache["camera/intrinsic"][0, 0, 0] += 1.0
+        elif change == "timestamp":
+            cache["camera/timestamp"][0] -= 0.001
+        else:
+            cache["frames/names"][0] = "frame_000001"
+
+    with pytest.raises(ValueError, match="camera checksum mismatch"):
+        validate_scene_cache(path)
+
+
 def test_unsupported_cache_schema_fails(prepared_cache: Path) -> None:
     """
-    Reject a cache whose schema_version is not 2, the only supported cache layout.
+    Reject a cache whose schema_version is not 3, the only supported cache layout.
 
     Args:
         prepared_cache: Cache whose schema_version will be changed.

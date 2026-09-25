@@ -241,7 +241,7 @@ Object visibility files are not read during preparation.
 Each scene produces `cache_root/<scene_id>.h5`, containing encoded RGB JPEGs,
 sensor-depth PNGs, anonymization-mask PNGs, camera matrices, timestamps, and all
 source object IDs, labels, oriented boxes, and axis-aligned boxes. It also stores
-source-file fingerprints, encoded-frame checksums, and an object-geometry checksum.
+source-file fingerprints, encoded-frame checksums, and camera and object-geometry checksums.
 RGB is returned as uint8 **RGB**, in native pixel orientation.
 Depth is uint16 **millimetres**, with zero representing
 invalid depth; depth values are preserved without resizing. Masks retain their
@@ -262,7 +262,7 @@ FFmpeg's temporary image files use the system temporary directory (configurable
 with `TMPDIR`); the temporary H5 is built beside its destination for atomic
 publication. Allow temporary space for one scene's selected images.
 
-Scene caches use schema version 2 and include object geometry. Normal dataset
+Scene caches use schema version 3 and include object geometry. Normal dataset
 access uses the EgoRecall annotation package and this prepared cache;
 `scannetpp_root` can be omitted after preparation.
 
@@ -385,8 +385,8 @@ object IDs/labels. Together, `--source --cache` additionally compare source
 fingerprints, camera values, and all object geometry against the cache.
 These checks use the same source inputs as preparation; they do not require
 meshes or segmentation files.
-`--cache` verifies cached object structure/checksums and compares object IDs and
-labels with the EgoRecall annotations without requiring the raw source. It decodes
+`--cache` verifies the cached camera and object checksums and structure, and compares
+object IDs and labels with the EgoRecall annotations without requiring the raw source. It decodes
 the first and last frames by default; `--decode-all` decodes every frame.
 Every cache check verifies all encoded image checksums and headers, including
 frames that are not fully decoded. Normal image reads do not repeat these checks. The JSON report states how many files, scenes, queries,

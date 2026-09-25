@@ -21,6 +21,7 @@ from egorecall.data.scene_h5 import (
     DEPTH_SIZE,
     IMAGE_DATASETS,
     OBJECT_ARRAY_SHAPES,
+    camera_sha256,
     object_geometry_sha256,
 )
 from egorecall.geometry import CameraSequence, ObjectGeometry
@@ -61,8 +62,8 @@ def validate_scene_cache(path: Path, *, decode_all: bool = False) -> int:
 
 def validate_cache_structure(h5_file: h5py.File) -> None:
     """
-    Check H5 attributes, array sizes, camera values, source fingerprints, and
-    object geometry before any frame payloads are read.
+    Check H5 attributes, array sizes, camera values and their checksum, source fingerprints,
+    and object geometry before any frame payloads are read.
 
     Args:
         h5_file: Open scene cache to inspect.
@@ -115,6 +116,8 @@ def validate_cache_structure(h5_file: h5py.File) -> None:
     for name in ("aligned_pose", "intrinsic", "timestamp"):
         if h5_file[f"camera/{name}"].dtype != np.float64:
             raise ValueError(f"camera/{name}: expected float64 values.")
+    if camera_sha256(camera_sequence) != h5_file["camera"].attrs["sha256"]:
+        raise ValueError(f"{h5_file.filename}: camera checksum mismatch.")
 
     # Encoded images and their checksums must cover the full camera timeline.
     for name in IMAGE_DATASETS.values():

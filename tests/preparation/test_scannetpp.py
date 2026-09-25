@@ -2,7 +2,9 @@
 Prepare scene caches from a synthetic ScanNet++ scene, with and without an annotation package.
 """
 
+import errno
 import json
+import os
 import sys
 from pathlib import Path
 
@@ -174,6 +176,44 @@ def test_failed_preparation_leaves_no_completed_cache(raw_root: Path, tmp_path: 
 
     with pytest.raises(ValueError, match="outside the ScanNet"):
         prepare_scene(source_scene, raw_root / "cache", ffmpeg=ffmpeg_path)
+
+
+@pytest.mark.parametrize("link_failure", ["unsupported", "published_by_another_run"])
+def test_publishing_without_hard_links_or_after_another_run(
+    raw_root: Path, tmp_path: Path, ffmpeg_path: str, monkeypatch: pytest.MonkeyPatch, link_failure: str
+) -> None:
+    """
+    Publish with a rename where hard links are unsupported, and keep a cache that another run
+    published first. Either way, one complete cache remains and no staging folder is left behind.
+
+    Args:
+        raw_root: Synthetic source scene.
+        tmp_path: Cache parent.
+        ffmpeg_path: FFmpeg executable.
+        monkeypatch: Fixture replacing os.link.
+        link_failure: How creating the hard link fails.
+    """
+    link = os.link
+
+    def failing_link(source: Path, destination: Path) -> None:
+        """
+        Fail like a filesystem without hard links, or publish first and then fail like a concurrent run.
+
+        Args:
+            source: Completed temporary cache.
+            destination: Path of the published cache.
+        """
+        if link_failure == "unsupported":
+            raise OSError(errno.EPERM, "Operation not permitted")
+        link(source, destination)
+        raise FileExistsError(errno.EEXIST, "File exists")
+
+    monkeypatch.setattr(os, "link", failing_link)
+    cache_root = tmp_path / "published_cache"
+    output = prepare_scene(ScanNetPPScene(raw_root, "scene_a"), cache_root, ffmpeg=ffmpeg_path)
+
+    assert [path.name for path in cache_root.iterdir()] == [output.name] == ["scene_a.h5"]
+    assert validate_scene_cache(output, decode_all=True) == 3
 
 
 def test_scene_without_source_objects(raw_root: Path, tmp_path: Path, ffmpeg_path: str) -> None:

@@ -5,7 +5,7 @@ HDF5 layout (N is the number of sampled frames; M is the number of source object
 
   /                            Root attributes:
                                  format = "egorecall-observations"
-                                 schema_version = 2
+                                 schema_version = 3
                                  scene_id: source scene identifier
                                  source_fps: nominal source frame rate, normally 60.0
                                  subsample_factor: sorted pose-record stride, normally 10
@@ -22,6 +22,7 @@ HDF5 layout (N is the number of sampled frames; M is the number of source object
   /frames/depth_png_sha256     (N,) S64: ASCII hexadecimal SHA-256 of each encoded depth image
   /frames/mask_png_sha256      (N,) S64: ASCII hexadecimal SHA-256 of each encoded mask image
 
+  /camera                      Group attribute sha256: checksum of frame names and camera arrays
   /camera/aligned_pose         (N, 4, 4) float64: mesh-aligned camera-to-world transforms, metres
   /camera/intrinsic            (N, 3, 3) float64: pinhole matrices at native RGB resolution
   /camera/timestamp            (N,) float64: source sensor timestamps, seconds
@@ -42,7 +43,8 @@ and depth has shape (192, 256) in uint16 millimetres, with zero indicating inval
 Depth intrinsics are computed by scaling the RGB intrinsics to the sensor-depth grid.
 Camera axes are x-right, y-down, z-forward in a mesh-aligned world with Z pointing up.
 Object rows are aligned by /objects/object_id and include every source object.
-The objects checksum uses the sorted, compact JSON representation in object_geometry_sha256().
+The camera and object checksums use the sorted, compact JSON representations in camera_sha256()
+and object_geometry_sha256().
 """
 
 from __future__ import annotations
@@ -62,9 +64,29 @@ from egorecall.data.images import decode_image
 from egorecall.geometry import CameraSequence, ObjectGeometry, scale_intrinsics
 
 DEPTH_SIZE = (256, 192)
-CACHE_VERSION = 2
+CACHE_VERSION = 3
 IMAGE_DATASETS = {"rgb": "rgb_jpg", "depth": "depth_png", "mask": "mask_png"}
 OBJECT_ARRAY_SHAPES = {"centroid": (3,), "axes": (3, 3), "lengths": (3,), "minimum": (3,), "maximum": (3,)}
+
+
+def camera_sha256(camera_sequence: CameraSequence) -> str:
+    """
+    Fingerprint frame names, poses, intrinsics, and timestamps in a deterministic representation.
+
+    Args:
+        camera_sequence: Camera records in sampled frame order.
+
+    Returns:
+        SHA-256 of UTF-8 JSON with sorted keys, compact separators, and finite numbers.
+    """
+    record = {
+        "frame_names": list(camera_sequence.frame_names),
+        "camera_to_world": camera_sequence.camera_to_world.tolist(),
+        "intrinsics": camera_sequence.intrinsics.tolist(),
+        "timestamps": camera_sequence.timestamps.tolist(),
+    }
+    encoded = json.dumps(record, ensure_ascii=False, sort_keys=True, separators=(",", ":"), allow_nan=False)
+    return hashlib.sha256(encoded.encode("utf-8")).hexdigest()
 
 
 def object_geometry_sha256(objects_by_id: dict[int, ObjectGeometry]) -> str:
@@ -221,6 +243,8 @@ class SceneH5:
         Returns:
             JPEG or PNG bytes suitable for independent image decoders.
         """
+        if kind not in IMAGE_DATASETS:
+            raise ValueError(f"Unknown image kind {kind!r}.")
         dataset_name = IMAGE_DATASETS[kind]
         return self._file[f"frames/{dataset_name}"][frame_idx].tobytes()
 
@@ -229,11 +253,14 @@ class SceneH5:
         Return camera metadata from memory without reading or decoding image payloads.
 
         Args:
-            frame_idx: Zero-based sampled frame index within the cache timeline.
+            frame_idx: Zero-based sampled frame index within the cache timeline; negative values count
+                back from the last frame.
 
         Returns:
             Frame index and name, timestamp, pose, and RGB/depth intrinsics with fresh arrays.
         """
+        # Record the position a negative index refers to; out-of-range indices raise IndexError.
+        frame_idx = range(len(self.frame_names))[frame_idx]
         intrinsic = self._cameras.intrinsics[frame_idx].copy()
         return FrameCamera(
             frame_idx=frame_idx,
@@ -249,7 +276,8 @@ class SceneH5:
         Decode one frame with independently owned image and camera arrays.
 
         Args:
-            frame_idx: Zero-based sampled frame index within the cache timeline.
+            frame_idx: Zero-based sampled frame index within the cache timeline; negative values count
+                back from the last frame.
 
         Returns:
             Native RGB, sensor depth, anonymization mask, pose, and scaled intrinsics.
@@ -257,9 +285,9 @@ class SceneH5:
         camera = self.camera(frame_idx)
 
         # Decode the image payloads at their native RGB and sensor-depth resolutions.
-        rgb = cast(NDArray[np.uint8], decode_image(self.encoded_image(frame_idx, "rgb"), "rgb"))
-        depth = cast(NDArray[np.uint16], decode_image(self.encoded_image(frame_idx, "depth"), "depth"))
-        mask = cast(NDArray[np.uint8], decode_image(self.encoded_image(frame_idx, "mask"), "mask"))
+        rgb = cast(NDArray[np.uint8], decode_image(self.encoded_image(camera.frame_idx, "rgb"), "rgb"))
+        depth = cast(NDArray[np.uint16], decode_image(self.encoded_image(camera.frame_idx, "depth"), "depth"))
+        mask = cast(NDArray[np.uint8], decode_image(self.encoded_image(camera.frame_idx, "mask"), "mask"))
 
         # Combine the decoded images with the independently owned camera metadata.
         return Observation(

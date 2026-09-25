@@ -2,6 +2,7 @@
 Prepare sampled RGB, depth, and mask images, cameras, and source object geometry in a local HDF5 scene cache.
 """
 
+import errno
 import hashlib
 import json
 import os
@@ -18,6 +19,7 @@ from egorecall.data.scene_h5 import (
     DEPTH_SIZE,
     IMAGE_DATASETS,
     OBJECT_ARRAY_SHAPES,
+    camera_sha256,
     object_geometry_sha256,
 )
 from egorecall.geometry import ObjectGeometry
@@ -100,9 +102,11 @@ def prepare_scene(
                 h5_file.create_dataset(f"frames/{name}", (len(frame_names),), dtype=h5py.vlen_dtype(np.uint8))
                 h5_file.create_dataset(f"frames/{name}_sha256", (len(frame_names),), dtype="S64")
 
+            # Store cameras with a checksum of their frame names and arrays for the standalone cache checker.
             h5_file.create_dataset("camera/aligned_pose", data=camera_sequence.camera_to_world)
             h5_file.create_dataset("camera/intrinsic", data=camera_sequence.intrinsics)
             h5_file.create_dataset("camera/timestamp", data=camera_sequence.timestamps)
+            h5_file["camera"].attrs["sha256"] = camera_sha256(camera_sequence)
 
             # Store source geometry locally for supervision without reopening the raw download.
             _write_objects(h5_file, source_objects)
@@ -126,8 +130,23 @@ def prepare_scene(
             if remaining:
                 raise ValueError(f"{source_scene.scene_id}: depth is missing source frames {sorted(remaining)[:5]}.")
 
-        # Linking the completed temporary file cannot overwrite an existing result.
-        os.link(temporary_h5, output_path)
+        # Flush the completed file to disk before publishing it, so a crash cannot leave a partial published cache.
+        with temporary_h5.open("rb") as stream:
+            os.fsync(stream.fileno())
+
+        # A hard link publishes the file atomically and fails if the destination exists, so it never
+        # replaces a completed cache. Filesystems without hard links, such as exFAT, use an atomic
+        # rename after checking the destination instead.
+        try:
+            os.link(temporary_h5, output_path)
+        except FileExistsError:
+            # Another run published the same scene first; keep its cache.
+            pass
+        except OSError as error:
+            if error.errno not in (errno.EPERM, errno.EOPNOTSUPP, errno.ENOTSUP, errno.ENOSYS):
+                raise
+            if not output_path.exists():
+                os.rename(temporary_h5, output_path)
     return output_path
 
 

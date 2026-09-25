@@ -96,3 +96,19 @@ def test_cache_reads_skip_checksum_audits(prepared_cache: Path) -> None:
         assert scene_h5.observation(1).depth[0, 0] == 1010
     with pytest.raises(ValueError, match="checksum mismatch"):
         validate_scene_cache(path)
+
+
+def test_negative_indices_and_unknown_image_kinds(prepared_cache: Path) -> None:
+    """
+    Record the frame position that a negative index refers to, and reject unknown image kinds clearly.
+
+    Args:
+        prepared_cache: Three-frame scene cache.
+    """
+    with SceneH5(prepared_cache / "scene_a.h5") as scene_h5:
+        assert scene_h5.camera(-1).frame_idx == 2
+        observation = scene_h5.observation(-3)
+        assert (observation.frame_idx, observation.frame_name) == (0, "frame_000000")
+
+        with pytest.raises(ValueError, match="Unknown image kind 'RGB'"):
+            scene_h5.encoded_image(0, "RGB")
