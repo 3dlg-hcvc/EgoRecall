@@ -18,6 +18,9 @@ from egorecall.integrity import FileFingerprint, fingerprint_file
 # ScanNet++ iPhone videos have a nominal rate of 60 frames per second.
 SOURCE_FPS = 60.0
 
+# A scene ID names one directory, so paths built from it stay under their root directory.
+SCENE_ID_PATTERN = r"[A-Za-z0-9_-]+"
+
 
 def source_frame_index(name: str) -> int:
     """
@@ -55,7 +58,7 @@ class ScanNetPPScene:
             scene_id: Scene directory name.
         """
         # Require a single directory name so scene paths stay under the data subtree.
-        if not re.fullmatch(r"[A-Za-z0-9_-]+", scene_id):
+        if not re.fullmatch(SCENE_ID_PATTERN, scene_id):
             raise ValueError(f"Invalid scene ID: {scene_id!r}.")
 
         self.root = root.expanduser().resolve()

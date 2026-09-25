@@ -198,37 +198,42 @@ def _check_scene_assets(
     Returns:
         Number of cached frames decoded.
     """
-    source_cameras = None
-    source_objects = None
-    source_files = None
-    if check_source:
-        source_scene = ScanNetPPScene(paths.scannetpp_root, scene_id)
-        source_cameras, source_objects = validate_source_scene(source_scene, subsample_factor)
-        if frame_names is not None and source_cameras.frame_names != frame_names:
-            raise ValueError(f"{scene_id}: source frame names differ from the annotation frame mapping.")
-        frame_names = source_cameras.frame_names
+    # One run can check many scenes, so every error raised below also names the scene.
+    try:
+        source_cameras = None
+        source_objects = None
+        source_files = None
+        if check_source:
+            source_scene = ScanNetPPScene(paths.scannetpp_root, scene_id)
+            source_cameras, source_objects = validate_source_scene(source_scene, subsample_factor)
+            if frame_names is not None and source_cameras.frame_names != frame_names:
+                raise ValueError(f"{scene_id}: source frame names differ from the annotation frame mapping.")
+            frame_names = source_cameras.frame_names
+            if scene_annotations is not None:
+                validate_object_annotations(scene_id, source_objects, scene_annotations)
+            if check_cache:
+                source_files = source_scene.cache_fingerprints()
+
+        if not check_cache:
+            return 0
+
+        cache_path = paths.cache_root / f"{scene_id}.h5"
+        frames_decoded = validate_scene_cache(cache_path, decode_all=decode_all)
+        with h5py.File(cache_path, "r") as h5_file:
+            validate_cache_compatibility(
+                h5_file,
+                scene_id,
+                frame_names,
+                subsample_factor,
+                source_fps,
+                cameras=source_cameras,
+                source_files=source_files,
+                objects_by_id=source_objects,
+            )
         if scene_annotations is not None:
-            validate_object_annotations(scene_id, source_objects, scene_annotations)
-        if check_cache:
-            source_files = source_scene.cache_fingerprints()
-
-    if not check_cache:
-        return 0
-
-    cache_path = paths.cache_root / f"{scene_id}.h5"
-    frames_decoded = validate_scene_cache(cache_path, decode_all=decode_all)
-    with h5py.File(cache_path, "r") as h5_file:
-        validate_cache_compatibility(
-            h5_file,
-            scene_id,
-            frame_names,
-            subsample_factor,
-            source_fps,
-            cameras=source_cameras,
-            source_files=source_files,
-            objects_by_id=source_objects,
-        )
-    if scene_annotations is not None:
-        with SceneH5(cache_path) as scene_h5:
-            validate_object_annotations(scene_id, scene_h5.objects(), scene_annotations)
-    return frames_decoded
+            with SceneH5(cache_path) as scene_h5:
+                validate_object_annotations(scene_id, scene_h5.objects(), scene_annotations)
+        return frames_decoded
+    except Exception as error:
+        error.add_note(f"While checking scene {scene_id}.")
+        raise

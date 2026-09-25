@@ -64,6 +64,22 @@ def test_wrong_query_schema_fails(package_root: Path) -> None:
         validate_annotation_package(package_root)
 
 
+def test_schema_error_names_type_differences(package_root: Path) -> None:
+    """
+    Name a column whose type differs from QUERY_SCHEMA, although its name matches.
+
+    Args:
+        package_root: Dataset whose query_idx column will be stored as int64.
+    """
+    path = package_root / "queries/test.parquet"
+    table = pq.read_table(path)
+    position = table.schema.get_field_index("query_idx")
+    pq.write_table(table.set_column(position, "query_idx", table["query_idx"].cast(pa.int64())), path)
+
+    with pytest.raises(ValueError, match="expected query_idx: int32, got query_idx: int64"):
+        validate_annotation_package(package_root)
+
+
 def test_invalid_query_time_fails(package_root: Path) -> None:
     """
     A query time outside its scene's sampled frames is a data error.
@@ -244,4 +260,55 @@ def test_invalid_stage_table_fails(package_root: Path, change: str) -> None:
     pq.write_table(pa.Table.from_pylist(rows, schema=table.schema), path)
 
     with pytest.raises((ValueError, KeyError)):
+        validate_annotation_package(package_root)
+
+
+@pytest.mark.parametrize(
+    ("field", "value", "message"),
+    [
+        ("scene_id", "scene a", "Invalid scene ID"),
+        ("source_fps", 0.0, "positive frame rate"),
+        ("nominal_timeline_fps", 0, "positive frame rate"),
+    ],
+)
+def test_unusable_scene_ids_and_rates_fail(package_root: Path, field: str, value: object, message: str) -> None:
+    """
+    Reject scene IDs that are not single directory names and zero frame rates, which preparation cannot use.
+
+    Args:
+        package_root: Package whose first scene record will be changed.
+        field: scenes.json field to change.
+        value: Invalid replacement value.
+        message: Expected error text.
+    """
+    path = package_root / "scenes.json"
+    scenes = json.loads(path.read_text())
+    scenes[0][field] = value
+    path.write_text(json.dumps(scenes))
+
+    with pytest.raises(ValueError, match=message):
+        validate_annotation_package(package_root)
+
+
+@pytest.mark.parametrize(("change", "message"), [("form", "Invalid ScanNet"), ("order", "must increase")])
+def test_frame_names_must_be_increasing_source_names(package_root: Path, change: str, message: str) -> None:
+    """
+    Reject frame names that are not ScanNet++ frame names or do not increase with frame_idx,
+    since preparation extracts source frames in video order.
+
+    Args:
+        package_root: Package whose first scene's frame names will be changed.
+        change: Replace one name with another form, or swap two names.
+        message: Expected error text.
+    """
+    path = package_root / "frames/test.parquet"
+    table = pq.read_table(path)
+    rows = table.to_pylist()
+    if change == "form":
+        rows[1]["frame_name"] = "image_000010"
+    else:
+        rows[0]["frame_name"], rows[1]["frame_name"] = rows[1]["frame_name"], rows[0]["frame_name"]
+    pq.write_table(pa.Table.from_pylist(rows, schema=table.schema), path)
+
+    with pytest.raises(ValueError, match=message):
         validate_annotation_package(package_root)

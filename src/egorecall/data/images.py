@@ -45,7 +45,8 @@ def decode_image(payload: bytes, kind: str) -> NDArray[np.uint8] | NDArray[np.ui
 
 def validate_image(payload: bytes, kind: str, size: tuple[int, int]) -> None:
     """
-    Check an encoded image's header and container without allocating decoded pixel arrays.
+    Check an encoded image's format, dimensions, channels, and completeness without decoding its pixels.
+    RGB frames are JPEG, masks are 8-bit grayscale PNG, and depth is 16-bit PNG.
 
     Args:
         payload: Encoded image bytes.
@@ -53,21 +54,24 @@ def validate_image(payload: bytes, kind: str, size: tuple[int, int]) -> None:
         size: Expected (width, height).
     """
     with Image.open(BytesIO(payload)) as image:
-        # Require the expected image dimensions and channel representation.
+        # Require the expected image dimensions, file format, and channel representation.
         if image.size != size:
             raise ValueError(f"{kind}: image dimensions {image.size} do not match {size}.")
 
         if kind == "rgb":
-            if image.mode != "RGB":
-                raise ValueError(f"RGB frame has unexpected mode {image.mode}.")
+            if image.format != "JPEG" or image.mode != "RGB":
+                raise ValueError(f"RGB frame must be an RGB JPEG, got {image.format}/{image.mode}.")
         elif kind == "mask":
-            if image.mode != "L":
-                raise ValueError(f"Mask frame has unexpected mode {image.mode}.")
+            if image.format != "PNG" or image.mode != "L":
+                raise ValueError(f"Mask frame must be an 8-bit grayscale PNG, got {image.format}/{image.mode}.")
         elif kind == "depth":
             if image.format != "PNG" or image.mode not in ("I;16", "I;16L", "I;16B"):
                 raise ValueError(f"Depth frame must be 16-bit PNG, got {image.format}/{image.mode}.")
         else:
             raise ValueError(f"Unknown image kind {kind!r}.")
 
-        # Check the compressed container without decoding its pixels.
+        # Pillow verifies PNG chunk checksums without decoding pixels. JPEG has no checksums,
+        # so require the end-of-image marker, which a truncated file lacks.
+        if kind == "rgb" and not payload.endswith(b"\xff\xd9"):
+            raise ValueError("RGB JPEG is truncated: its end-of-image marker is missing.")
         image.verify()

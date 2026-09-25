@@ -15,6 +15,7 @@ import pyarrow.parquet as pq
 
 from egorecall.arguments import require_integer, require_text
 from egorecall.data.records import FRAME_SCHEMA, QUERY_SCHEMA, STAGE_SCHEMA, SceneRecord, SplitManifest
+from egorecall.data.scannetpp import source_frame_index
 from egorecall.integrity import fingerprint_file, relative_file
 from egorecall.validation.records import validate_annotations, validate_query, validate_scene, validate_table
 
@@ -99,9 +100,9 @@ def manifest_splits(manifest: dict[str, object]) -> dict[str, SplitManifest]:
 
 def validate_frame_mapping(frame_table: pa.Table, scene_records: dict[str, SceneRecord]) -> None:
     """
-    Check that each scene has exactly one source filename for every frame number
-    from zero to num_frames - 1. Duplicate or missing entries would pair queries
-    with the wrong images.
+    Check that each scene has exactly one ScanNet++ frame name for every frame number
+    from zero to num_frames - 1, with source indices increasing in frame-number order.
+    Duplicate, missing, or reordered entries would pair queries with the wrong images.
 
     Args:
         frame_table: Rows from frames/<split>.parquet.
@@ -122,8 +123,12 @@ def validate_frame_mapping(frame_table: pa.Table, scene_records: dict[str, Scene
         frame_names = names_by_index[scene_id]
         if set(frame_names) != set(range(scene_record["num_frames"])):
             raise ValueError(f"{scene_id}: incomplete frame mapping.")
-        if len(set(frame_names.values())) != len(frame_names):
-            raise ValueError(f"{scene_id}: duplicate source frame names.")
+
+        # Preparation extracts source frames in video order, so the names must be ScanNet++ frame
+        # names whose source indices increase with frame_idx; this also rules out duplicate names.
+        source_indices = [source_frame_index(frame_names[frame_idx]) for frame_idx in range(scene_record["num_frames"])]
+        if any(earlier >= later for earlier, later in zip(source_indices, source_indices[1:])):
+            raise ValueError(f"{scene_id}: frame names must increase with frame_idx.")
 
 
 def _query_keys(table: pa.Table, split: str, name: str) -> list[tuple[str, int]]:

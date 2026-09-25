@@ -1,6 +1,6 @@
 """
 Run egorecall-check through check_dataset() and its command line: scene selection by split, stage, or ID,
-report counts, and invalid option combinations.
+report counts, errors that name the scene, and invalid option combinations.
 """
 
 import json
@@ -225,3 +225,23 @@ def test_checker_cli_selects_split_and_stages(
         main()
     assert error.value.code == 2
     assert "without --split or --stages" in capsys.readouterr().err
+
+
+def test_scene_errors_name_the_scene(package_root: Path, raw_root: Path) -> None:
+    """
+    Name the scene in errors raised while checking its files, since one run can check many scenes.
+
+    Args:
+        package_root: Annotation package containing scene_a.
+        raw_root: Source scene whose camera timestamps will stop increasing.
+    """
+    path = raw_root / "data/scene_a/iphone/pose_intrinsic_imu.json"
+    poses = json.loads(path.read_text())
+    for pose in poses.values():
+        pose["timestamp"] = 100.0
+    path.write_text(json.dumps(poses))
+
+    add_manifest_hashes(package_root)
+    with pytest.raises(ValueError, match="strictly increasing") as error:
+        check_dataset(DatasetPaths(package_root, raw_root), scene_ids=["scene_a"], check_source=True)
+    assert error.value.__notes__ == ["While checking scene scene_a."]

@@ -3,6 +3,7 @@ Validate one record at a time: JSON field types, required keys, and scene IDs, o
 frame indices in scene records, query rows, and scene annotations, plus table schemas.
 """
 
+import re
 from typing import cast
 
 import pyarrow as pa
@@ -17,6 +18,7 @@ from egorecall.data.records import (
     TemporalSummary,
     decode_program,
 )
+from egorecall.data.scannetpp import SCENE_ID_PATTERN
 
 
 def require_fields(value: object, fields: frozenset[str], context: str) -> dict[str, object]:
@@ -49,6 +51,8 @@ def validate_scene(value: object) -> SceneRecord:
     """
     record = require_fields(value, SceneRecord.__required_keys__, "Scene metadata")
     scene_id = require_text(record["scene_id"], "scene_id")
+    if not re.fullmatch(SCENE_ID_PATTERN, scene_id):
+        raise ValueError(f"Invalid scene ID: {scene_id!r}.")
 
     split = record["split"]
     if split not in ("train", "val", "test"):
@@ -62,6 +66,8 @@ def validate_scene(value: object) -> SceneRecord:
 
     for field in ("source_fps", "nominal_timeline_fps"):
         require_number(record[field], f"{scene_id}/{field}")
+        if record[field] <= 0:
+            raise ValueError(f"{scene_id}/{field}: expected a positive frame rate.")
 
     require_text(record["annotations"], f"{scene_id}/annotations")
     return cast(SceneRecord, record)
@@ -165,9 +171,31 @@ def validate_table(table: pa.Table, schema: pa.Schema, name: str) -> None:
         name: Table description used in validation errors.
     """
     if not table.schema.equals(schema, check_metadata=False):
-        raise ValueError(f"{name}: incompatible schema; expected {schema.names}, got {table.column_names}.")
+        # Describe each differing column, since matching names can hide type or nullability differences.
+        expected = {field.name: _describe_field(field) for field in schema}
+        actual = {field.name: _describe_field(field) for field in table.schema}
+        differences = []
+        for column in dict.fromkeys([*expected, *actual]):
+            if expected.get(column) != actual.get(column):
+                missing = f"no {column} column"
+                differences.append(f"expected {expected.get(column, missing)}, got {actual.get(column, missing)}")
+        detail = "; ".join(differences) or f"expected column order {schema.names}, got {table.column_names}"
+        raise ValueError(f"{name}: incompatible schema; {detail}.")
     if any(column.null_count for column in table.columns):
         raise ValueError(f"{name}: null table fields are not allowed.")
+
+
+def _describe_field(field: pa.Field) -> str:
+    """
+    Describe one Arrow column for schema errors.
+
+    Args:
+        field: Column name, type, and nullability.
+
+    Returns:
+        Text such as "query_idx: int32", ending in " not null" for columns that disallow nulls.
+    """
+    return f"{field.name}: {field.type}" + ("" if field.nullable else " not null")
 
 
 def is_program(value: object) -> bool:

@@ -15,6 +15,7 @@ from PIL import Image
 
 from egorecall.arguments import require_integer, require_text
 from egorecall.data.images import validate_image
+from egorecall.data.scannetpp import SCENE_ID_PATTERN
 from egorecall.data.scene_h5 import (
     CACHE_VERSION,
     DEPTH_SIZE,
@@ -78,7 +79,7 @@ def validate_cache_structure(h5_file: h5py.File) -> None:
             raise ValueError(f"Cache {name} must be an integer.")
 
     scene_id = attrs["scene_id"]
-    if not isinstance(scene_id, str) or not re.fullmatch(r"[A-Za-z0-9_-]+", scene_id):
+    if not isinstance(scene_id, str) or not re.fullmatch(SCENE_ID_PATTERN, scene_id):
         raise ValueError("Invalid cache scene_id.")
 
     if isinstance(attrs["source_fps"], (bool, np.bool_)) or not isinstance(
@@ -214,13 +215,18 @@ def validate_cache_compatibility(
         source_files: Current source fingerprints, when checking cache reuse.
         objects_by_id: Source object geometry, when checking against the raw download.
     """
-    if (
-        h5_file.attrs["scene_id"] != scene_id
-        or tuple(h5_file["frames/names"].asstr()[:]) != frame_names
-        or h5_file.attrs["subsample_factor"] != subsample_factor
-        or h5_file.attrs["source_fps"] != source_fps
-    ):
-        raise ValueError(f"{h5_file.filename}: cache scene or timeline does not match the requested data.")
+    # Report each differing setting on its own; a different stride also changes the frame names.
+    cached_scene_id = h5_file.attrs["scene_id"]
+    if cached_scene_id != scene_id:
+        raise ValueError(f"{h5_file.filename}: cache holds scene {cached_scene_id!r}, expected {scene_id!r}.")
+    cached_stride = h5_file.attrs["subsample_factor"]
+    if cached_stride != subsample_factor:
+        raise ValueError(f"{h5_file.filename}: cache sampling stride is {cached_stride}, expected {subsample_factor}.")
+    cached_fps = h5_file.attrs["source_fps"]
+    if cached_fps != source_fps:
+        raise ValueError(f"{h5_file.filename}: cache source_fps is {cached_fps}, expected {source_fps}.")
+    if tuple(h5_file["frames/names"].asstr()[:]) != frame_names:
+        raise ValueError(f"{h5_file.filename}: cached frame names differ from the expected timeline.")
 
     if source_files is not None and json.loads(h5_file.attrs["source_files"]) != source_files:
         raise ValueError(

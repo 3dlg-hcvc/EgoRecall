@@ -12,7 +12,7 @@ from egorecall import DatasetPaths
 from egorecall.data.scannetpp import ScanNetPPScene
 from egorecall.data.scene_h5 import CACHE_VERSION, SceneH5, object_geometry_sha256
 from egorecall.integrity import fingerprint_file
-from egorecall.validation.cache import validate_scene_cache
+from egorecall.validation.cache import validate_cache_compatibility, validate_scene_cache
 from egorecall.validation.check import check_dataset, check_source_scenes
 from tests.helpers import add_manifest_hashes
 
@@ -29,7 +29,7 @@ def test_stale_source_and_wrong_timeline_fail(raw_root: Path, prepared_cache: Pa
     source_scene = ScanNetPPScene(raw_root, "scene_a")
     before = fingerprint_file(prepared_cache / "scene_a.h5")
     paths = DatasetPaths(scannetpp_root=raw_root, cache_root=prepared_cache)
-    with pytest.raises(ValueError, match="timeline"):
+    with pytest.raises(ValueError, match="sampling stride is 10, expected 5"):
         check_source_scenes(paths, ["scene_a"], 5, check_cache=True)
 
     exif = source_scene.iphone_exif_path
@@ -164,3 +164,35 @@ def test_unsupported_cache_schema_fails(prepared_cache: Path) -> None:
 
     with pytest.raises(ValueError, match="unsupported scene-cache format or schema_version"):
         validate_scene_cache(path)
+
+
+@pytest.mark.parametrize(
+    ("setting", "value", "message"),
+    [
+        ("scene_id", "scene_b", "cache holds scene 'scene_a', expected 'scene_b'"),
+        ("subsample_factor", 5, "cache sampling stride is 10, expected 5"),
+        ("source_fps", 30.0, "cache source_fps is 60.0, expected 30.0"),
+        ("frame_names", ("frame_000000",), "cached frame names differ from the expected timeline"),
+    ],
+)
+def test_cache_mismatch_names_the_setting(prepared_cache: Path, setting: str, value: object, message: str) -> None:
+    """
+    Report which cache setting differs: the scene, sampling stride, source frame rate, or frame names.
+
+    Args:
+        prepared_cache: Cache prepared for scene_a with stride 10 at 60 FPS.
+        setting: Expected setting to change.
+        value: Setting value that differs from the cache.
+        message: Expected error text.
+    """
+    expected = {
+        "scene_id": "scene_a",
+        "frame_names": ("frame_000000", "frame_000010", "frame_000020"),
+        "subsample_factor": 10,
+        "source_fps": 60.0,
+    }
+    with h5py.File(prepared_cache / "scene_a.h5", "r") as h5_file:
+        validate_cache_compatibility(h5_file, **expected)
+
+        with pytest.raises(ValueError, match=message):
+            validate_cache_compatibility(h5_file, **{**expected, setting: value})
