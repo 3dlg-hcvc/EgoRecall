@@ -49,9 +49,11 @@ def test_source_checks_need_only_cache_inputs(package_root: Path, raw_root: Path
         check_dataset(paths, scene_ids=["scene_a"], check_source=True, check_cache=True)
 
 
-@pytest.mark.parametrize("change", ["missing", "label"])
+@pytest.mark.parametrize(
+    ("change", "message"), [("missing", "annotated objects have no ScanNet"), ("label", "labels differ")]
+)
 def test_source_object_join_fails(
-    package_root: Path, raw_root: Path, tmp_path: Path, ffmpeg_path: str, change: str
+    package_root: Path, raw_root: Path, tmp_path: Path, ffmpeg_path: str, change: str, message: str
 ) -> None:
     """
     Reject cached objects that are missing from, or inconsistent with, the annotation population.
@@ -62,6 +64,7 @@ def test_source_object_join_fails(
         tmp_path: Cache parent.
         ffmpeg_path: FFmpeg executable.
         change: Remove a required object or change its label.
+        message: Expected error text.
     """
     path = raw_root / "data/scene_a/scans/segments_anno.json"
     source_annotation = json.loads(path.read_text())
@@ -74,5 +77,5 @@ def test_source_object_join_fails(
     cache_root = tmp_path / "changed_objects_cache"
     prepare_scene(ScanNetPPScene(raw_root, "scene_a"), cache_root, ffmpeg=ffmpeg_path)
     _add_manifest_hashes(package_root)
-    with pytest.raises((KeyError, ValueError)):
+    with pytest.raises(ValueError, match=message):
         check_dataset(DatasetPaths(package_root, cache_root=cache_root), scene_ids=["scene_a"], check_cache=True)

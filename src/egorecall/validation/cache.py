@@ -7,7 +7,6 @@ import json
 import re
 from io import BytesIO
 from pathlib import Path
-from typing import cast
 
 import h5py
 import numpy as np
@@ -69,8 +68,8 @@ def validate_cache_structure(h5_file: h5py.File) -> None:
     attrs = h5_file.attrs
     if attrs["format"] != "egorecall-observations" or attrs["schema_version"] != CACHE_VERSION:
         raise ValueError(
-            f"{h5_file.filename}: expected scene-cache schema {CACHE_VERSION} with object geometry; "
-            "recreate this cache using the current preparation command in a new cache directory."
+            f"{h5_file.filename}: unsupported scene-cache format or schema_version; expected schema {CACHE_VERSION}. "
+            "Prepare the scene again in a new cache directory."
         )
 
     for name in ("schema_version", "subsample_factor"):
@@ -132,9 +131,6 @@ def validate_cache_structure(h5_file: h5py.File) -> None:
         require_integer(value["bytes"], f"{name}/bytes", minimum=1)
         if not isinstance(value["sha256"], str) or not re.fullmatch(r"[0-9a-f]{64}", value["sha256"]):
             raise ValueError(f"{name}: invalid source SHA-256 digest.")
-    source_files = cast(dict[str, FileFingerprint], fingerprints)
-    if "scans/segments_anno.json" not in source_files:
-        raise ValueError("Cache source_files must include scans/segments_anno.json.")
 
     # Object IDs, labels, box columns, and their checksum must agree.
     _validate_cached_objects(h5_file, scene_id)

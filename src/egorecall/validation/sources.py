@@ -74,6 +74,12 @@ def validate_object_annotations(
     """
     if scene_annotations["scene_id"] != scene_id:
         raise ValueError("Geometry and annotation scenes differ.")
+
+    # List every annotated object without geometry, rather than failing on the first missing ID.
+    missing = sorted({int(object_id) for object_id in scene_annotations["objects"]} - source_objects.keys())
+    if missing:
+        raise ValueError(f"{scene_id}: annotated objects have no ScanNet++ geometry: {missing}.")
+
     for object_id, object_annotation in scene_annotations["objects"].items():
         if source_objects[int(object_id)].label != object_annotation["label"]:
             raise ValueError(f"{scene_id}/{object_id}: source and annotation labels differ.")

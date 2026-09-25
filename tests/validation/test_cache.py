@@ -147,17 +147,16 @@ def test_invalid_cached_objects_fail(prepared_cache: Path, change: str) -> None:
         validate_scene_cache(path)
 
 
-def test_schema_1_cache_requires_recreation(prepared_cache: Path) -> None:
+def test_unsupported_cache_schema_fails(prepared_cache: Path) -> None:
     """
-    Fail explicitly on a schema-1 cache without object geometry instead of loading geometry from raw files.
+    Reject a cache whose schema_version is not 2, the only supported cache layout.
 
     Args:
-        prepared_cache: Cache rewritten as schema 1 with its objects group removed.
+        prepared_cache: Cache whose schema_version will be changed.
     """
     path = prepared_cache / "scene_a.h5"
     with h5py.File(path, "r+") as cache:
         cache.attrs["schema_version"] = 1
-        del cache["objects"]
 
-    with pytest.raises(ValueError, match="recreate this cache"):
+    with pytest.raises(ValueError, match="unsupported scene-cache format or schema_version"):
         validate_scene_cache(path)
