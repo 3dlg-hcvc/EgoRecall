@@ -1,3 +1,7 @@
+"""
+Read ScanNet++ cameras and object geometry from a synthetic scene in the original download layout.
+"""
+
 from pathlib import Path
 
 import numpy as np

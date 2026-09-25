@@ -1,3 +1,7 @@
+"""
+Prepare scene caches from a synthetic ScanNet++ scene, with and without an annotation package.
+"""
+
 import json
 import sys
 from pathlib import Path

@@ -1,3 +1,8 @@
+"""
+Check query-time observation windows, separate ground-truth access, and scene selection
+through EgoRecallDataset and EgoRecallScene.
+"""
+
 import shutil
 from dataclasses import asdict
 from pathlib import Path

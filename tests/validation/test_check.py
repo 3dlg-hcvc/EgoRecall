@@ -1,3 +1,8 @@
+"""
+Run egorecall-check through check_dataset() and its command line: scene selection by split, stage, or ID,
+report counts, and invalid option combinations.
+"""
+
 import json
 import sys
 from pathlib import Path

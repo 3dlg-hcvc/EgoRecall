@@ -1,3 +1,7 @@
+"""
+Decode each supported ScanNet++ depth format into uint16 millimetres.
+"""
+
 import zlib
 from pathlib import Path
 

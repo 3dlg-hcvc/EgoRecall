@@ -1,3 +1,7 @@
+"""
+Check raw ScanNet++ scene paths and files, and compare source or cached objects with the visibility annotations.
+"""
+
 import json
 from pathlib import Path
 

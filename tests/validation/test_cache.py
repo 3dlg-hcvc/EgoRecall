@@ -1,3 +1,7 @@
+"""
+Detect stale, corrupted, or malformed scene caches with the standalone cache checks.
+"""
+
 import json
 from pathlib import Path
 

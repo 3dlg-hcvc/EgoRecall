@@ -1,3 +1,7 @@
+"""
+Read cameras, object geometry, and images from a prepared scene cache without repeating checker audits.
+"""
+
 from pathlib import Path
 
 import h5py

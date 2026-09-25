@@ -1,3 +1,7 @@
+"""
+Extract video frames by source index with FFmpeg, and reject requests that could drop, reorder, or overwrite frames.
+"""
+
 from pathlib import Path
 
 import numpy as np
