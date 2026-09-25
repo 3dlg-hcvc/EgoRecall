@@ -13,9 +13,12 @@ import numpy as np
 from egorecall.arguments import require_integer
 from egorecall.geometry.boxes import ObjectGeometry
 from egorecall.geometry.cameras import CameraSequence
-from egorecall.integrity import FileFingerprint, fingerprint_file, relative_file
+from egorecall.integrity import FileFingerprint, fingerprint_file
 from scannetpp_common.annotations import load_annotation
 from scannetpp_common.scene_release import ScannetppSceneRelease
+
+# ScanNet++ iPhone videos have a nominal rate of 60 frames per second.
+SOURCE_FPS = 60.0
 
 
 def source_frame_index(name: str) -> int:
@@ -111,18 +114,6 @@ class ScanNetPPScene:
             )
             objects_by_id[oid] = object_geometry
         return objects_by_id
-
-    def metadata_path(self, name: str) -> Path:
-        """
-        Locate an upstream metadata file, such as semantic_classes.txt.
-
-        Args:
-            name: Filename relative to the dataset's metadata directory.
-
-        Returns:
-            Path to the named metadata file; opening it reports a missing file.
-        """
-        return relative_file(self.root / "metadata", name)
 
     def cache_sources(self) -> dict[str, Path]:
         """

@@ -165,15 +165,14 @@ def raw_root(tmp_path: Path, ffmpeg_path: str) -> Path:
         ffmpeg_path: FFmpeg executable used to encode lossless test videos.
 
     Returns:
-        Dataset root containing data/scene_a and metadata.
+        Dataset root containing data/scene_a.
     """
     root = tmp_path / "scannetpp"
     scene = root / "data/scene_a"
     iphone = scene / "iphone"
     scans = scene / "scans"
-    for directory in (iphone, scans, root / "metadata"):
+    for directory in (iphone, scans):
         directory.mkdir(parents=True)
-    (root / "metadata/semantic_classes.txt").write_text("chair\ntable\nlamp\n")
 
     # Source indices 0, 10, and 20 become the package's three canonical frames.
     poses = {}

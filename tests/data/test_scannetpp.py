@@ -29,6 +29,5 @@ def test_raw_geometry_and_camera_conventions(raw_root: Path) -> None:
     np.testing.assert_array_equal(objects[2].lengths, [1, 2, 3])
     assert objects[3].label == "lamp"
 
-    assert source_scene.metadata_path("semantic_classes.txt").is_file()
     assert source_scene.paths.scan_mesh_path.is_file()
     assert source_scene.paths.scan_mesh_segs_path.is_file()

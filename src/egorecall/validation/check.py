@@ -13,7 +13,7 @@ from egorecall.arguments import require_integer
 from egorecall.config import DatasetPaths
 from egorecall.data.metadata import SceneMetadata, load_scene_metadata, read_scene_records, select_scene_ids
 from egorecall.data.records import SceneAnnotations
-from egorecall.data.scannetpp import ScanNetPPScene
+from egorecall.data.scannetpp import SOURCE_FPS, ScanNetPPScene
 from egorecall.data.scene_h5 import SceneH5
 from egorecall.integrity import fingerprint_file, relative_file
 from egorecall.validation.cache import validate_cache_compatibility, validate_scene_cache
@@ -199,7 +199,13 @@ def check_source_scenes(
 
     frames_decoded = sum(
         _check_scene_assets(
-            paths, scene_id, subsample_factor, 60.0, check_source=True, check_cache=check_cache, decode_all=decode_all
+            paths,
+            scene_id,
+            subsample_factor,
+            SOURCE_FPS,
+            check_source=True,
+            check_cache=check_cache,
+            decode_all=decode_all,
         )
         for scene_id in scene_ids
     )

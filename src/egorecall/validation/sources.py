@@ -3,7 +3,6 @@ Check raw ScanNet++ file availability, camera values, and object geometry before
 """
 
 import json
-import re
 
 import numpy as np
 
@@ -30,8 +29,6 @@ def validate_source_scene(
         Checked camera records and object geometry for source/cache comparisons.
     """
     require_integer(subsample_factor, "subsample_factor", minimum=1)
-    if not re.fullmatch(r"[A-Za-z0-9_-]+", source_scene.scene_id):
-        raise ValueError(f"Invalid scene ID: {source_scene.scene_id!r}.")
     for path in source_scene.cache_sources().values():
         if not path.is_file():
             raise FileNotFoundError(path)
@@ -115,8 +112,6 @@ def validate_cameras(camera_sequence: CameraSequence) -> None:
         camera_sequence: Poses, intrinsics, and timestamps in sampled frame order.
     """
     count = len(camera_sequence.frame_names)
-    if any(not re.fullmatch(r"frame_[0-9]{6,}", name) for name in camera_sequence.frame_names):
-        raise ValueError("Invalid ScanNet++ frame name.")
     indices = [source_frame_index(name) for name in camera_sequence.frame_names]
     if not count or any(a >= b for a, b in zip(indices, indices[1:])):
         raise ValueError("Camera frame names must be nonempty, unique, and ordered by source index.")

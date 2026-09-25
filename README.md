@@ -196,7 +196,6 @@ scene needs these iPhone files for observation preparation:
 
 ```text
 scannetpp/v2/
-  metadata/                       # Optional upstream metadata files
   data/<scene_id>/
     iphone/
       rgb.mkv
@@ -215,8 +214,6 @@ observations and all source object IDs, labels, and boxes. Mesh and segmentation
 files support operations such as visibility rendering; they are not needed to
 read a prepared scene's observations or supervision. DSLR assets and COLMAP
 reconstruction files are not required for preparation.
-The global `metadata/` directory is needed only when requesting a file through
-`ScanNetPPScene.metadata_path()`.
 Adapted toolkit helpers are documented in
 [scannetpp_common/ATTRIBUTION.md](src/scannetpp_common/ATTRIBUTION.md).
 
@@ -388,7 +385,7 @@ egorecall-check --config configs/paths.toml \
 object IDs/labels. Together, `--source --cache` additionally compare source
 fingerprints, camera values, and all object geometry against the cache.
 These checks use the same source inputs as preparation; they do not require
-meshes, segmentation files, or the global metadata directory.
+meshes or segmentation files.
 `--cache` verifies cached object structure/checksums and compares object IDs and
 labels with the EgoRecall annotations without requiring the raw source. It decodes
 the first and last frames by default; `--decode-all` decodes every frame.

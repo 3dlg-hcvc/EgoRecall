@@ -35,7 +35,6 @@ def test_source_checks_need_only_cache_inputs(package_root: Path, raw_root: Path
         raw_root: Source directory to reduce to the files consumed by preparation.
         prepared_cache: Compatible scene cache.
     """
-    (raw_root / "metadata").rename(raw_root / "saved_metadata")
     for name in ("mesh_aligned_0.05.ply", "segments.json"):
         (raw_root / "data/scene_a/scans" / name).unlink()
     _add_manifest_hashes(package_root)

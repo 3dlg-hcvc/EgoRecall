@@ -53,30 +53,21 @@ def validate_image(payload: bytes, kind: str, size: tuple[int, int]) -> None:
         size: Expected (width, height).
     """
     with Image.open(BytesIO(payload)) as image:
-        _validate_image_header(image, kind, size)
+        # Require the expected image dimensions and channel representation.
+        if image.size != size:
+            raise ValueError(f"{kind}: image dimensions {image.size} do not match {size}.")
+
+        if kind == "rgb":
+            if image.mode != "RGB":
+                raise ValueError(f"RGB frame has unexpected mode {image.mode}.")
+        elif kind == "mask":
+            if image.mode != "L":
+                raise ValueError(f"Mask frame has unexpected mode {image.mode}.")
+        elif kind == "depth":
+            if image.format != "PNG" or image.mode not in ("I;16", "I;16L", "I;16B"):
+                raise ValueError(f"Depth frame must be 16-bit PNG, got {image.format}/{image.mode}.")
+        else:
+            raise ValueError(f"Unknown image kind {kind!r}.")
+
+        # Check the compressed container without decoding its pixels.
         image.verify()
-
-
-def _validate_image_header(image: Image.Image, kind: str, size: tuple[int, int]) -> None:
-    """
-    Require the expected image dimensions and channel representation.
-
-    Args:
-        image: Image opened by Pillow.
-        kind: One of rgb, depth, or mask.
-        size: Expected (width, height).
-    """
-    if image.size != size:
-        raise ValueError(f"{kind}: image dimensions {image.size} do not match {size}.")
-
-    if kind == "rgb":
-        if image.mode != "RGB":
-            raise ValueError(f"RGB frame has unexpected mode {image.mode}.")
-    elif kind == "mask":
-        if image.mode != "L":
-            raise ValueError(f"Mask frame has unexpected mode {image.mode}.")
-    elif kind == "depth":
-        if image.format != "PNG" or image.mode not in ("I;16", "I;16L", "I;16B"):
-            raise ValueError(f"Depth frame must be 16-bit PNG, got {image.format}/{image.mode}.")
-    else:
-        raise ValueError(f"Unknown image kind {kind!r}.")

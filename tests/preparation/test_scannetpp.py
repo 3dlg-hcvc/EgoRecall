@@ -21,7 +21,7 @@ def test_preparation_without_annotations_needs_only_cache_inputs(
     capsys: pytest.CaptureFixture[str],
 ) -> None:
     """
-    Prepare through the CLI with no annotation root, global metadata, mesh, or segmentation file.
+    Prepare through the CLI with no annotation root, mesh, or segmentation file.
 
     Args:
         raw_root: Synthetic source directory containing the cache's actual inputs.
@@ -31,9 +31,6 @@ def test_preparation_without_annotations_needs_only_cache_inputs(
         capsys: Captured CLI output and argument errors.
     """
     # Remove assets that scene-cache preparation does not consume.
-    metadata = raw_root / "metadata"
-    saved_metadata = raw_root / "saved_metadata"
-    metadata.rename(saved_metadata)
     for name in ("mesh_aligned_0.05.ply", "segments.json"):
         (raw_root / "data/scene_a/scans" / name).unlink()
 
@@ -63,13 +60,6 @@ def test_preparation_without_annotations_needs_only_cache_inputs(
         assert cache.frame_names == ("frame_000000", "frame_000010", "frame_000020")
         assert cache.observation(1).depth[0, 0] == 1010
         assert set(cache.objects()) == {1, 2, 3}
-
-    # Metadata is required only when a caller requests a particular metadata file.
-    source_scene = ScanNetPPScene(raw_root, "scene_a")
-    with pytest.raises(FileNotFoundError):
-        source_scene.metadata_path("semantic_classes.txt").read_text()
-    saved_metadata.rename(metadata)
-    assert source_scene.metadata_path("semantic_classes.txt") == metadata / "semantic_classes.txt"
 
     # The annotation-based CLI still requires an annotation root.
     monkeypatch.setattr(sys, "argv", ["egorecall-prepare", "--config", str(config), "--split", "test"])
