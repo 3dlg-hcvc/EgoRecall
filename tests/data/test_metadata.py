@@ -95,6 +95,17 @@ def test_training_metadata_is_unstaged(package_root: Path) -> None:
         load_scene_metadata(package_root, "train", stages=1)
 
 
+def test_unavailable_split_metadata_fails(package_root: Path) -> None:
+    """
+    Report a split absent from the dataset directory before reading its nonexistent frame table.
+
+    Args:
+        package_root: A test-only package.
+    """
+    with pytest.raises(ValueError, match="not in this dataset directory"):
+        load_scene_metadata(package_root, "val")
+
+
 def test_selected_frames_use_explicit_indices(package_root: Path) -> None:
     """
     Index reordered frame rows and limit frame-value validation to the requested scenes.

@@ -1,3 +1,4 @@
+import shutil
 from dataclasses import asdict
 from pathlib import Path
 
@@ -77,8 +78,27 @@ def test_observations_and_supervision_without_raw_source(package_root: Path, pre
         assert scene_data.supervision.source_objects[3].label == "lamp"
         with pytest.raises(KeyError):
             scene_data.query(17)
-    with pytest.raises(FileNotFoundError):
+
+    # Scene B has no stage-1 query; with every stage selected, it is valid but has no prepared cache.
+    with pytest.raises(KeyError, match="scene_b"):
         dataset.open_scene("scene_b")
+    with pytest.raises(FileNotFoundError):
+        EgoRecallDataset(DatasetPaths(package_root, cache_root=prepared_cache)).open_scene("scene_b")
+
+
+def test_scenes_outside_the_selection_are_rejected(package_root: Path, prepared_cache: Path) -> None:
+    """
+    Reject a scene without selected queries before opening its cache, even when a cache file exists.
+
+    Args:
+        package_root: Package whose stage 1 contains queries from scene_a only.
+        prepared_cache: Cache directory holding scene_a.h5.
+    """
+    shutil.copy(prepared_cache / "scene_a.h5", prepared_cache / "scene_b.h5")
+    dataset = EgoRecallDataset(DatasetPaths(package_root, cache_root=prepared_cache), stages=1)
+    for scene_id in ("scene_b", "unknown_scene"):
+        with pytest.raises(KeyError, match="no queries in the selected split and stages"):
+            dataset.open_scene(scene_id)
 
 
 def test_cached_geometry_survives_unavailable_raw_source(

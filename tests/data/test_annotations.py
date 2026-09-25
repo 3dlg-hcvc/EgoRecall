@@ -158,12 +158,12 @@ def test_training_is_unstaged(package_root: Path) -> None:
 
 def test_unavailable_split_fails(package_root: Path) -> None:
     """
-    Report missing split membership before attempting nonexistent table paths.
+    Report a split absent from the dataset directory before reading its nonexistent tables.
 
     Args:
         package_root: A test-only package.
     """
-    with pytest.raises(FileNotFoundError):
+    with pytest.raises(ValueError, match="not in this dataset directory"):
         EgoRecallAnnotations(package_root, split="val")
 
 

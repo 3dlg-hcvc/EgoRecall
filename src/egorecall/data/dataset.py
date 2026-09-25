@@ -172,7 +172,8 @@ class EgoRecallScene:
 
     def __init__(self, paths: DatasetPaths, annotation_reader: EgoRecallAnnotations, scene_id: str) -> None:
         """
-        Open this scene's H5 file. Annotation and cache consistency is checked by egorecall-check.
+        Open this scene's H5 file. The scene must have at least one query in the annotation
+        reader's selection. Annotation and cache consistency is checked by egorecall-check.
 
         Args:
             paths: Dataset and cache locations.
@@ -181,6 +182,8 @@ class EgoRecallScene:
         """
         if paths.cache_root is None:
             raise ValueError("cache_root is required to read observations.")
+        if scene_id not in annotation_reader.scene_ids:
+            raise KeyError(f"Scene {scene_id!r} has no queries in the selected split and stages.")
 
         self.scene_id = scene_id
         self._annotation_reader = annotation_reader

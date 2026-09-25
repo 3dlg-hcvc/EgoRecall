@@ -11,7 +11,7 @@ import h5py
 
 from egorecall.arguments import require_integer
 from egorecall.config import DatasetPaths
-from egorecall.data.metadata import load_scene_metadata, read_scene_records, select_scene_ids
+from egorecall.data.metadata import SceneMetadata, load_scene_metadata, read_scene_records, select_scene_ids
 from egorecall.data.records import SceneAnnotations
 from egorecall.data.scannetpp import ScanNetPPScene
 from egorecall.data.scene_h5 import SceneH5
@@ -86,6 +86,8 @@ def verify_package(root: Path) -> int:
 def check_dataset(
     paths: DatasetPaths,
     *,
+    split: str | None = None,
+    stages: int | str | None = None,
     scene_ids: list[str] | None = None,
     check_source: bool = False,
     check_cache: bool = False,
@@ -93,12 +95,14 @@ def check_dataset(
 ) -> CheckReport:
     """
     Check all EgoRecall annotations and optionally their ScanNet++ source files and prepared H5 caches.
-    A scene selection limits source/cache work; package integrity still covers
-    every manifest file and all query/annotation records.
+    A split, stage, or scene selection limits source/cache work and chooses scenes the same way as
+    egorecall-prepare; package integrity still covers every manifest file and all query/annotation records.
 
     Args:
         paths: Configured dataset locations.
-        scene_ids: Optional source/cache scene subset.
+        split: Split whose scenes receive source/cache checks, or None for scenes from every split.
+        stages: Exact stage or inclusive LO:HI range within split, selecting scenes with queries in those stages.
+        scene_ids: Optional source/cache scene subset, taken from the split and stage selection when one is given.
         check_source: Check source cameras and boxes, and compare frame names and object IDs/labels with annotations.
         check_cache: Require and validate a prepared cache for each selected scene.
         decode_all: Decode every cached frame; otherwise check the first and last.
@@ -114,42 +118,51 @@ def check_dataset(
         raise ValueError("Cache checks require cache_root.")
     if decode_all and not check_cache:
         raise ValueError("decode_all requires cache checking.")
+    if stages is not None and split is None:
+        raise ValueError("Stage selection requires a split.")
+    if (split is not None or scene_ids is not None) and not (check_source or check_cache):
+        raise ValueError("Split, stage, and scene selections apply only to source or cache checks.")
 
     # Validate all annotations before limiting the source/cache work to selected scenes.
     files_verified = verify_package(paths.dataset_root)
     split_counts = validate_annotation_package(paths.dataset_root)
-    scene_records = read_scene_records(paths.dataset_root)
-    selected_ids = select_scene_ids(tuple(sorted(scene_records)), scene_ids)
 
+    # Select scenes as preparation does: from one split and its stages, or by scene ID across every split.
+    metadata_by_scene: dict[str, SceneMetadata] = {}
+    if split is not None:
+        metadata_by_scene = load_scene_metadata(paths.dataset_root, split, stages=stages, scene_ids=scene_ids)
+    elif check_source or check_cache:
+        scene_records = read_scene_records(paths.dataset_root)
+        selected_ids = select_scene_ids(tuple(sorted(scene_records)), scene_ids)
+        for split_name in split_counts:
+            split_scene_ids = [scene_id for scene_id in selected_ids if scene_records[scene_id]["split"] == split_name]
+            if split_scene_ids:
+                metadata_by_scene.update(load_scene_metadata(paths.dataset_root, split_name, scene_ids=split_scene_ids))
+
+    # Compare each selected scene's source files or prepared cache with its annotations.
     frames_decoded = 0
-    if check_source or check_cache:
-        for split in split_counts:
-            split_scene_ids = [scene_id for scene_id in selected_ids if scene_records[scene_id]["split"] == split]
-            if not split_scene_ids:
-                continue
-            metadata_by_scene = load_scene_metadata(paths.dataset_root, split, scene_ids=split_scene_ids)
-            for scene_id, scene_meta in metadata_by_scene.items():
-                scene_record = scene_meta.scene_record
-                with gzip.open(paths.dataset_root / scene_record["annotations"], "rt", encoding="utf-8") as stream:
-                    scene_annotations = json.load(stream)
-                frames_decoded += _check_scene_assets(
-                    paths,
-                    scene_id,
-                    scene_record["subsample_factor"],
-                    scene_record["source_fps"],
-                    frame_names=scene_meta.frame_names,
-                    scene_annotations=scene_annotations,
-                    check_source=check_source,
-                    check_cache=check_cache,
-                    decode_all=decode_all,
-                )
+    for scene_id, scene_meta in metadata_by_scene.items():
+        scene_record = scene_meta.scene_record
+        with gzip.open(paths.dataset_root / scene_record["annotations"], "rt", encoding="utf-8") as stream:
+            scene_annotations = json.load(stream)
+        frames_decoded += _check_scene_assets(
+            paths,
+            scene_id,
+            scene_record["subsample_factor"],
+            scene_record["source_fps"],
+            frame_names=scene_meta.frame_names,
+            scene_annotations=scene_annotations,
+            check_source=check_source,
+            check_cache=check_cache,
+            decode_all=decode_all,
+        )
 
     return CheckReport(
         files_verified,
         sum(counts["queries"] for counts in split_counts.values()),
         sum(counts["scenes"] for counts in split_counts.values()),
-        len(selected_ids) if check_source else 0,
-        len(selected_ids) if check_cache else 0,
+        len(metadata_by_scene) if check_source else 0,
+        len(metadata_by_scene) if check_cache else 0,
         frames_decoded,
     )
 

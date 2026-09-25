@@ -147,12 +147,12 @@ def test_invalid_cached_objects_fail(prepared_cache: Path, change: str) -> None:
         validate_scene_cache(path)
 
 
-def test_old_cache_schema_requires_recreation(prepared_cache: Path) -> None:
+def test_schema_1_cache_requires_recreation(prepared_cache: Path) -> None:
     """
-    Fail explicitly on an observation-only cache instead of loading geometry from raw files.
+    Fail explicitly on a schema-1 cache without object geometry instead of loading geometry from raw files.
 
     Args:
-        prepared_cache: Cache to convert to the earlier incomplete schema.
+        prepared_cache: Cache rewritten as schema 1 with its objects group removed.
     """
     path = prepared_cache / "scene_a.h5"
     with h5py.File(path, "r+") as cache:

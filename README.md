@@ -231,7 +231,12 @@ egorecall-check --config configs/paths.toml --cache --scenes SCENE_ID
 Omit `--scenes` to prepare every scene represented in the requested stages.
 Stages select scenes; every selected scene retains its complete sampled frame
 sequence. The source check verifies that these frame names agree with the
-annotation frame table.
+annotation frame table. `egorecall-check` accepts the same `--split` and
+`--stages` options to check every scene in a selection:
+
+```bash
+egorecall-check --config configs/paths.toml --cache --split test --stages 1
+```
 
 Preparation reads `scenes.json` and the selected scenes' frame mappings.
 With `--stages`, it reads scene IDs and stage numbers from the assignment table.
@@ -319,8 +324,9 @@ with dataset.open_scene(scene_id) as scene_data:
 `EgoRecallDataset` is the main entry point. Its `annotations` member is an
 `EgoRecallAnnotations` reader, providing query/stage selection and annotation
 access. `open_scene()` returns an `EgoRecallScene` context that owns one prepared
-scene cache. Geometry is read from that cache, and visibility annotations are
-loaded when supervision is requested.
+scene cache; the scene must have at least one query in the selection. Geometry is
+read from that cache, and visibility annotations are loaded when supervision is
+requested.
 
 Pass the `QuerySample` to a method. Its query contains only `scene_id`, `query_idx`,
 `description`, and `frame`; its observation window includes frame zero through
@@ -376,8 +382,9 @@ egorecall-check --config configs/paths.toml \
   --source --cache --scenes SCENE_ID --decode-all
 ```
 
-`--scenes` limits source/cache work; the complete annotation package is always
-checked. `--source` validates source camera alignment, object geometry, and
+`--split`, `--stages`, and `--scenes` limit source/cache work and select scenes as
+`egorecall-prepare` does; the complete annotation package is always checked.
+`--source` validates source camera alignment, object geometry, and
 object IDs/labels. Together, `--source --cache` additionally compare source
 fingerprints, camera values, and all object geometry against the cache.
 These checks use the same source inputs as preparation; they do not require

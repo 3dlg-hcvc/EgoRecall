@@ -55,6 +55,8 @@ class EgoRecallAnnotations:
         scene_records = read_scene_records(self.root)
         represented_splits = {scene_record["split"] for scene_record in scene_records.values()}
         self.available_splits = tuple(name for name in ("train", "val", "test") if name in represented_splits)
+        if self.split not in self.available_splits:
+            raise ValueError(f"Split {split!r} is not in this dataset directory; available: {self.available_splits}.")
 
         # Select stage assignments first so a small evaluation subset does not load every query.
         stage_by_key: dict[QueryKey, int] = {}

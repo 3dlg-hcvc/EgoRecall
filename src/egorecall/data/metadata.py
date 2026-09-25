@@ -125,6 +125,8 @@ def load_scene_metadata(
         raise ValueError("Training is unstaged; omit stages when reading train.")
 
     scene_records = read_scene_records(dataset_root, split)
+    if not scene_records:
+        raise ValueError(f"Split {split!r} is not in this dataset directory.")
     available = tuple(
         sorted(scene_id for scene_id, scene_record in scene_records.items() if scene_record["num_queries"])
     )

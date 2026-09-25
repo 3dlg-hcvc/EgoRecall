@@ -17,6 +17,8 @@ def main() -> None:
     """
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--config", type=Path, required=True, help="TOML file containing [paths].")
+    parser.add_argument("--split", choices=("train", "val", "test"), help="Limit source/cache checks to this split.")
+    parser.add_argument("--stages", help="Exact stage or inclusive LO:HI range within --split.")
     parser.add_argument("--scenes", nargs="+", help="Limit source/cache checks to these scenes.")
     parser.add_argument(
         "--source", action="store_true", help="Check source cameras, boxes, and their agreement with annotations."
@@ -33,8 +35,8 @@ def main() -> None:
 
     paths = DatasetPaths.from_toml(args.config)
     if args.without_annotations:
-        if not args.scenes or args.subsample_factor is None:
-            parser.error("--without-annotations requires --scenes and --subsample-factor.")
+        if not args.scenes or args.subsample_factor is None or args.split is not None or args.stages is not None:
+            parser.error("--without-annotations requires --scenes and --subsample-factor, without --split or --stages.")
         report = check_source_scenes(
             paths, args.scenes, args.subsample_factor, check_cache=args.cache, decode_all=args.decode_all
         )
@@ -42,7 +44,13 @@ def main() -> None:
         if args.subsample_factor is not None:
             parser.error("--subsample-factor requires --without-annotations.")
         report = check_dataset(
-            paths, scene_ids=args.scenes, check_source=args.source, check_cache=args.cache, decode_all=args.decode_all
+            paths,
+            split=args.split,
+            stages=args.stages,
+            scene_ids=args.scenes,
+            check_source=args.source,
+            check_cache=args.cache,
+            decode_all=args.decode_all,
         )
     print(json.dumps(asdict(report), indent=2))
 
