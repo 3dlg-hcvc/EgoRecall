@@ -3,7 +3,7 @@ from pathlib import Path
 import numpy as np
 
 from egorecall.data.scannetpp import ScanNetPPScene
-from egorecall.geometry.cameras import scale_intrinsics
+from egorecall.geometry import scale_intrinsics
 
 
 def test_raw_geometry_and_camera_conventions(raw_root: Path) -> None:

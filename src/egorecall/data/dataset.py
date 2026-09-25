@@ -14,7 +14,7 @@ from egorecall.config import DatasetPaths
 from egorecall.data.annotations import EgoRecallAnnotations
 from egorecall.data.records import QueryRecord, SceneAnnotations
 from egorecall.data.scene_h5 import FrameCamera, Observation, SceneH5
-from egorecall.geometry.boxes import ObjectGeometry
+from egorecall.geometry import ObjectGeometry
 
 
 @dataclass(frozen=True)

@@ -14,8 +14,7 @@ import pyarrow as pa
 import pyarrow.parquet as pq
 
 from egorecall.arguments import require_integer, require_text
-from egorecall.data.records import SceneRecord, SplitManifest
-from egorecall.data.schema import FRAME_SCHEMA, QUERY_SCHEMA, STAGE_SCHEMA
+from egorecall.data.records import FRAME_SCHEMA, QUERY_SCHEMA, STAGE_SCHEMA, SceneRecord, SplitManifest
 from egorecall.integrity import fingerprint_file, relative_file
 from egorecall.validation.records import validate_annotations, validate_query, validate_scene, validate_table
 

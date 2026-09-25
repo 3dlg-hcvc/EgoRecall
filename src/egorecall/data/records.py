@@ -1,15 +1,56 @@
 """
-Typed records for EgoRecall queries and scene annotations. Field names match
-the JSON and Parquet files. Object IDs are scoped to scene_id.
+Typed records and Arrow table schemas for EgoRecall queries, stages, frames, scene
+annotations, and the manifest. Field names match the JSON and Parquet files. Object
+IDs are scoped to scene_id.
 """
 
 import json
 from typing import Literal, TypedDict, cast
 
+import pyarrow as pa
+
 type QueryKey = tuple[str, int]
 type Split = Literal["train", "val", "test"]
 type EmissionReason = Literal["new", "answer_change", "rebirth"]
 type Program = list[str | int | Program]
+
+# Column names and Arrow types for the query, stage, and frame tables. The standalone
+# checker compares these schemas with the Parquet tables before the readers use them.
+OBJECT_IDS = pa.list_(pa.int32())
+QUERY_SCHEMA = pa.schema(
+    [
+        ("scene_id", pa.string()),
+        ("query_idx", pa.int32()),
+        ("split", pa.string()),
+        ("description", pa.string()),
+        ("program_json", pa.string()),
+        ("source_query_id", pa.string()),
+        ("program_depth", pa.int32()),
+        ("frame", pa.int32()),
+        ("any_target", pa.bool_()),
+        ("emit_reason", pa.string()),
+        ("target_oids", OBJECT_IDS),
+        ("visible_target_oids", OBJECT_IDS),
+        ("hidden_target_oids", OBJECT_IDS),
+    ]
+)
+
+STAGE_SCHEMA = pa.schema(
+    [
+        ("scene_id", pa.string()),
+        ("query_idx", pa.int32()),
+        ("split", pa.string()),
+        ("stage", pa.int32()),
+    ]
+)
+
+FRAME_SCHEMA = pa.schema(
+    [
+        ("scene_id", pa.string()),
+        ("frame_idx", pa.int32()),
+        ("frame_name", pa.string()),
+    ]
+)
 
 
 class QueryRecord(TypedDict):

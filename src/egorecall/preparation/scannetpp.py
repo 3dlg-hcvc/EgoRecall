@@ -13,9 +13,14 @@ import numpy as np
 
 from egorecall.data.images import encode_depth, validate_image
 from egorecall.data.scannetpp import SOURCE_FPS, ScanNetPPScene, source_frame_index
-from egorecall.data.scene_h5 import CACHE_VERSION, DEPTH_SIZE, IMAGE_DATASETS, OBJECT_ARRAY_SHAPES
-from egorecall.geometry.boxes import ObjectGeometry
-from egorecall.integrity import object_geometry_sha256
+from egorecall.data.scene_h5 import (
+    CACHE_VERSION,
+    DEPTH_SIZE,
+    IMAGE_DATASETS,
+    OBJECT_ARRAY_SHAPES,
+    object_geometry_sha256,
+)
+from egorecall.geometry import ObjectGeometry
 from egorecall.preparation.depth import iter_depth_frames
 from egorecall.preparation.video import extract_video_frames
 

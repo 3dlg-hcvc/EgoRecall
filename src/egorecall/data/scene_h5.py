@@ -47,6 +47,8 @@ The objects checksum uses the sorted, compact JSON representation in object_geom
 
 from __future__ import annotations
 
+import hashlib
+import json
 from dataclasses import dataclass
 from pathlib import Path
 from types import TracebackType
@@ -57,13 +59,38 @@ import numpy as np
 from numpy.typing import NDArray
 
 from egorecall.data.images import decode_image
-from egorecall.geometry.boxes import ObjectGeometry
-from egorecall.geometry.cameras import CameraSequence, scale_intrinsics
+from egorecall.geometry import CameraSequence, ObjectGeometry, scale_intrinsics
 
 DEPTH_SIZE = (256, 192)
 CACHE_VERSION = 2
 IMAGE_DATASETS = {"rgb": "rgb_jpg", "depth": "depth_png", "mask": "mask_png"}
 OBJECT_ARRAY_SHAPES = {"centroid": (3,), "axes": (3, 3), "lengths": (3,), "minimum": (3,), "maximum": (3,)}
+
+
+def object_geometry_sha256(objects_by_id: dict[int, ObjectGeometry]) -> str:
+    """
+    Fingerprint object IDs, labels, and box values in a deterministic representation.
+
+    Args:
+        objects_by_id: Validated source geometry keyed by object ID.
+
+    Returns:
+        SHA-256 of UTF-8 JSON with sorted IDs/keys, compact separators, and finite numbers.
+    """
+    records = [
+        {
+            "object_id": oid,
+            "label": object_geometry.label,
+            "centroid": object_geometry.centroid.tolist(),
+            "axes": object_geometry.axes.tolist(),
+            "lengths": object_geometry.lengths.tolist(),
+            "minimum": object_geometry.minimum.tolist(),
+            "maximum": object_geometry.maximum.tolist(),
+        }
+        for oid, object_geometry in sorted(objects_by_id.items())
+    ]
+    encoded = json.dumps(records, ensure_ascii=False, sort_keys=True, separators=(",", ":"), allow_nan=False)
+    return hashlib.sha256(encoded.encode("utf-8")).hexdigest()
 
 
 @dataclass(frozen=True)

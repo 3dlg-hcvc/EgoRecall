@@ -16,10 +16,15 @@ from PIL import Image
 
 from egorecall.arguments import require_integer, require_text
 from egorecall.data.images import validate_image
-from egorecall.data.scene_h5 import CACHE_VERSION, DEPTH_SIZE, IMAGE_DATASETS, OBJECT_ARRAY_SHAPES
-from egorecall.geometry.boxes import ObjectGeometry
-from egorecall.geometry.cameras import CameraSequence
-from egorecall.integrity import FileFingerprint, object_geometry_sha256
+from egorecall.data.scene_h5 import (
+    CACHE_VERSION,
+    DEPTH_SIZE,
+    IMAGE_DATASETS,
+    OBJECT_ARRAY_SHAPES,
+    object_geometry_sha256,
+)
+from egorecall.geometry import CameraSequence, ObjectGeometry
+from egorecall.integrity import FileFingerprint
 from egorecall.validation.sources import validate_cameras, validate_object_geometry
 
 

@@ -15,8 +15,8 @@ import pyarrow as pa
 import pyarrow.parquet as pq
 import pytest
 
+from egorecall.data.records import FRAME_SCHEMA, QUERY_SCHEMA, STAGE_SCHEMA
 from egorecall.data.scannetpp import ScanNetPPScene
-from egorecall.data.schema import FRAME_SCHEMA, QUERY_SCHEMA, STAGE_SCHEMA
 from egorecall.preparation.scannetpp import prepare_scene
 
 

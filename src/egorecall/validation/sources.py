@@ -9,8 +9,7 @@ import numpy as np
 from egorecall.arguments import require_integer, require_text
 from egorecall.data.records import SceneAnnotations
 from egorecall.data.scannetpp import ScanNetPPScene, source_frame_index
-from egorecall.geometry.boxes import ObjectGeometry
-from egorecall.geometry.cameras import CameraSequence
+from egorecall.geometry import CameraSequence, ObjectGeometry
 
 
 def validate_source_scene(

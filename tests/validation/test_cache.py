@@ -6,8 +6,8 @@ import pytest
 
 from egorecall import DatasetPaths
 from egorecall.data.scannetpp import ScanNetPPScene
-from egorecall.data.scene_h5 import CACHE_VERSION, SceneH5
-from egorecall.integrity import fingerprint_file, object_geometry_sha256
+from egorecall.data.scene_h5 import CACHE_VERSION, SceneH5, object_geometry_sha256
+from egorecall.integrity import fingerprint_file
 from egorecall.validation.cache import validate_scene_cache
 from egorecall.validation.check import check_dataset, check_source_scenes
 from tests.helpers import _add_manifest_hashes

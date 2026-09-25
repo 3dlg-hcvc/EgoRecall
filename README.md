@@ -10,9 +10,9 @@ observation access with separate ground-truth supervision.
 | Location | Contents |
 |---|---|
 | `src/egorecall/data/` | Dataset, annotation, ScanNet++, and H5 readers; table schemas and image codecs |
-| `src/egorecall/preparation/` | ScanNet++ to H5 preparation and FFmpeg frame extraction |
+| `src/egorecall/preparation/` | ScanNet++ to H5 preparation, FFmpeg frame extraction, and depth decoding |
 | `src/egorecall/validation/` | Standalone annotation, source, and cache checks |
-| `src/egorecall/geometry/` | Shared camera and box records and intrinsic scaling |
+| `src/egorecall/geometry.py` | Shared camera and box records and intrinsic scaling |
 | `src/egorecall/arguments.py`, `src/egorecall/integrity.py` | Shared value checks, file/path helpers, and fingerprints |
 | `src/egorecall/cli/` | Command-line entry points |
 | `ATTRIBUTION.md` | Code adapted from the ScanNet++ toolkit |

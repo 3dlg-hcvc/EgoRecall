@@ -12,8 +12,7 @@ from pathlib import Path
 import numpy as np
 
 from egorecall.arguments import require_integer
-from egorecall.geometry.boxes import ObjectGeometry
-from egorecall.geometry.cameras import CameraSequence
+from egorecall.geometry import CameraSequence, ObjectGeometry
 from egorecall.integrity import FileFingerprint, fingerprint_file
 
 # ScanNet++ iPhone videos have a nominal rate of 60 frames per second.
