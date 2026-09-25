@@ -34,7 +34,7 @@ def validate_source_scene(
             raise FileNotFoundError(path)
 
     # Read IDs before creating a dictionary, where duplicate IDs would overwrite each other.
-    with source_scene.paths.scan_anno_json_path.open(encoding="utf-8") as stream:
+    with source_scene.scan_anno_json_path.open(encoding="utf-8") as stream:
         object_records = json.load(stream)["segGroups"]
     if not isinstance(object_records, list):
         raise ValueError("segGroups must be a list.")
@@ -46,7 +46,7 @@ def validate_source_scene(
         object_ids.add(object_id)
         require_text(object_record["label"], f"{object_id}/label")
 
-    with source_scene.paths.iphone_exif_path.open(encoding="utf-8") as stream:
+    with source_scene.iphone_exif_path.open(encoding="utf-8") as stream:
         exif_records = json.load(stream)
     image_sizes = {
         (exif_record["PixelXDimension"], exif_record["PixelYDimension"]) for exif_record in exif_records.values()

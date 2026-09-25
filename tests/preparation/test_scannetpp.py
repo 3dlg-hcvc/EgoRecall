@@ -159,9 +159,9 @@ def test_failed_preparation_leaves_no_completed_cache(raw_root: Path, tmp_path: 
         ffmpeg_path: FFmpeg executable.
     """
     source_scene = ScanNetPPScene(raw_root, "scene_a")
-    depth = source_scene.paths.iphone_depth_path.read_bytes()
+    depth = source_scene.iphone_depth_path.read_bytes()
     first_size = int.from_bytes(depth[:4], "little")
-    source_scene.paths.iphone_depth_path.write_bytes(depth[: 4 + first_size])
+    source_scene.iphone_depth_path.write_bytes(depth[: 4 + first_size])
 
     root = tmp_path / "failed_cache"
     with pytest.raises(ValueError, match="depth is missing"):

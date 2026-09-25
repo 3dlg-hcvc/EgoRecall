@@ -1,5 +1,6 @@
 """
-Read ScanNet++ camera records and object geometry from a user-supplied download.
+Read ScanNet++ camera records and object geometry from a user-supplied download. File locations
+and objectId indexing follow the ScanNet++ toolkit; see ATTRIBUTION.md.
 """
 
 from __future__ import annotations
@@ -14,8 +15,6 @@ from egorecall.arguments import require_integer
 from egorecall.geometry.boxes import ObjectGeometry
 from egorecall.geometry.cameras import CameraSequence
 from egorecall.integrity import FileFingerprint, fingerprint_file
-from scannetpp_common.annotations import load_annotation
-from scannetpp_common.scene_release import ScannetppSceneRelease
 
 # ScanNet++ iPhone videos have a nominal rate of 60 frames per second.
 SOURCE_FPS = 60.0
@@ -40,6 +39,8 @@ class ScanNetPPScene:
     """
     Access one scene in an original ScanNet++ download. Source objects include
     the complete annotation population; no EgoRecall visibility filter is applied.
+    The iphone_* and scan_anno_json_path attributes locate the source files that
+    preparation reads.
 
     Args:
         root: Dataset root containing data, not the data subtree itself.
@@ -54,10 +55,21 @@ class ScanNetPPScene:
             root: Original ScanNet++ dataset root.
             scene_id: Scene directory name.
         """
-        self.root = root.expanduser().resolve()
+        # Require a single directory name so scene paths stay under the data subtree.
+        if not re.fullmatch(r"[A-Za-z0-9_-]+", scene_id):
+            raise ValueError(f"Invalid scene ID: {scene_id!r}.")
 
+        self.root = root.expanduser().resolve()
         self.scene_id = scene_id
-        self.paths = ScannetppSceneRelease(scene_id, self.root / "data")
+        self.scene_root_dir = self.root / "data" / scene_id
+
+        # Source files read to prepare and check the scene cache.
+        self.iphone_pose_intrinsic_imu_path = self.scene_root_dir / "iphone/pose_intrinsic_imu.json"
+        self.iphone_exif_path = self.scene_root_dir / "iphone/exif.json"
+        self.iphone_video_path = self.scene_root_dir / "iphone/rgb.mkv"
+        self.iphone_video_mask_path = self.scene_root_dir / "iphone/rgb_mask.mkv"
+        self.iphone_depth_path = self.scene_root_dir / "iphone/depth.bin"
+        self.scan_anno_json_path = self.scene_root_dir / "scans/segments_anno.json"
 
     def cameras(self, subsample_factor: int = 10, *, frame_names: tuple[str, ...] | None = None) -> CameraSequence:
         """
@@ -72,13 +84,13 @@ class ScanNetPPScene:
             Camera poses, intrinsics, and timestamps in the sampled frame order.
         """
         require_integer(subsample_factor, "subsample_factor", minimum=1)
-        with self.paths.iphone_pose_intrinsic_imu_path.open(encoding="utf-8") as stream:
+        with self.iphone_pose_intrinsic_imu_path.open(encoding="utf-8") as stream:
             pose_records = json.load(stream)
         if frame_names is None:
             frame_names = tuple(sorted(pose_records)[::subsample_factor])
 
         # EXIF dimensions describe the unrotated RGB grid used by the pinhole matrices.
-        with self.paths.iphone_exif_path.open(encoding="utf-8") as stream:
+        with self.iphone_exif_path.open(encoding="utf-8") as stream:
             exif_records = json.load(stream)
         first_exif = next(iter(exif_records.values()))
         image_size = (first_exif["PixelXDimension"], first_exif["PixelYDimension"])
@@ -100,8 +112,13 @@ class ScanNetPPScene:
         Returns:
             Object geometry keyed by source objectId, with no visibility filtering.
         """
+        with self.scan_anno_json_path.open(encoding="utf-8") as stream:
+            object_records = json.load(stream)["segGroups"]
+
+        # Index objects by ScanNet++ objectId, the ID used by EgoRecall annotations.
         objects_by_id: dict[int, ObjectGeometry] = {}
-        for oid, object_record in load_annotation(self.paths.scan_anno_json_path).items():
+        for object_record in object_records:
+            oid = object_record["objectId"]
             box = object_record["obb"]
             object_geometry = ObjectGeometry(
                 object_id=oid,
@@ -123,14 +140,14 @@ class ScanNetPPScene:
             Paths keyed by filenames relative to the scene directory.
         """
         return {
-            str(path.relative_to(self.paths.scene_root_dir)): path
+            str(path.relative_to(self.scene_root_dir)): path
             for path in (
-                self.paths.iphone_pose_intrinsic_imu_path,
-                self.paths.iphone_exif_path,
-                self.paths.iphone_video_path,
-                self.paths.iphone_video_mask_path,
-                self.paths.iphone_depth_path,
-                self.paths.scan_anno_json_path,
+                self.iphone_pose_intrinsic_imu_path,
+                self.iphone_exif_path,
+                self.iphone_video_path,
+                self.iphone_video_mask_path,
+                self.iphone_depth_path,
+                self.scan_anno_json_path,
             )
         }
 

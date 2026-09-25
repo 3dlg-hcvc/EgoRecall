@@ -1,5 +1,6 @@
 """
 Decode ScanNet++ sensor depth from whole-stream DEFLATE or per-frame LZ4/DEFLATE.
+Adapted from the ScanNet++ toolkit's depth extraction; see ATTRIBUTION.md.
 """
 
 import zlib
@@ -11,8 +12,10 @@ import lz4.block
 import numpy as np
 from numpy.typing import NDArray
 
-DEPTH_HEIGHT = 192
-DEPTH_WIDTH = 256
+from egorecall.data.scene_h5 import DEPTH_SIZE
+
+# The scene cache stores sensor depth without resizing, so decoded frames have its depth size.
+DEPTH_WIDTH, DEPTH_HEIGHT = DEPTH_SIZE
 _PIXELS = DEPTH_HEIGHT * DEPTH_WIDTH
 
 

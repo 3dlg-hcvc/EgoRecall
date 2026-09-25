@@ -5,7 +5,7 @@ import lz4.block
 import numpy as np
 import pytest
 
-from scannetpp_common.iphone import iter_depth_frames
+from egorecall.preparation.depth import iter_depth_frames
 
 
 @pytest.mark.parametrize("codec", ["global", "lz4", "deflate", "mixed"])

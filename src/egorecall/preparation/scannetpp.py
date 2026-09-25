@@ -16,8 +16,8 @@ from egorecall.data.scannetpp import SOURCE_FPS, ScanNetPPScene, source_frame_in
 from egorecall.data.scene_h5 import CACHE_VERSION, DEPTH_SIZE, IMAGE_DATASETS, OBJECT_ARRAY_SHAPES
 from egorecall.geometry.boxes import ObjectGeometry
 from egorecall.integrity import object_geometry_sha256
+from egorecall.preparation.depth import iter_depth_frames
 from egorecall.preparation.video import extract_video_frames
-from scannetpp_common.iphone import iter_depth_frames
 
 
 def prepare_scene(
@@ -70,11 +70,9 @@ def prepare_scene(
         tempfile.TemporaryDirectory(prefix=f".{source_scene.scene_id}-", dir=cache_root) as staging,
     ):
         work_dir = Path(temporary)
-        rgb_files = extract_video_frames(
-            source_scene.paths.iphone_video_path, frame_names, work_dir / "rgb", ffmpeg=ffmpeg
-        )
+        rgb_files = extract_video_frames(source_scene.iphone_video_path, frame_names, work_dir / "rgb", ffmpeg=ffmpeg)
         mask_files = extract_video_frames(
-            source_scene.paths.iphone_video_mask_path, frame_names, work_dir / "mask", masks=True, ffmpeg=ffmpeg
+            source_scene.iphone_video_mask_path, frame_names, work_dir / "mask", masks=True, ffmpeg=ffmpeg
         )
 
         # Write encoded frames one at a time, retaining native depth values and RGB orientation.
@@ -115,7 +113,7 @@ def prepare_scene(
             position_by_source = {source_frame_index(name): position for position, name in enumerate(frame_names)}
             remaining = set(position_by_source)
             for source_idx, depth in iter_depth_frames(
-                source_scene.paths.iphone_depth_path, selected=set(position_by_source)
+                source_scene.iphone_depth_path, selected=set(position_by_source)
             ):
                 _write_image(h5_file, position_by_source[source_idx], "depth", encode_depth(depth))
                 remaining.remove(source_idx)

@@ -28,7 +28,7 @@ def test_stale_source_and_wrong_timeline_fail(raw_root: Path, prepared_cache: Pa
     with pytest.raises(ValueError, match="timeline"):
         check_source_scenes(paths, ["scene_a"], 5, check_cache=True)
 
-    exif = source_scene.paths.iphone_exif_path
+    exif = source_scene.iphone_exif_path
     exif.write_text(exif.read_text() + "\n")
     with pytest.raises(ValueError, match="source files changed"):
         check_source_scenes(paths, ["scene_a"], 10, check_cache=True)

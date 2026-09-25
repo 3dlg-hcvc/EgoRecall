@@ -9,7 +9,7 @@ description = "Data access for the EgoRecall temporal grounding benchmark"
 readme = "README.md"
 requires-python = ">=3.12"
 license = "MIT"
-license-files = ["LICENSE", "src/scannetpp_common/ATTRIBUTION.md"]
+license-files = ["LICENSE", "ATTRIBUTION.md"]
 dependencies = ["pyarrow>=18", "numpy>=1.26", "h5py>=3.11", "pillow>=11", "lz4>=4"]
 
 [project.optional-dependencies]
@@ -22,9 +22,6 @@ egorecall-check = "egorecall.cli.check_dataset:main"
 
 [tool.setuptools.packages.find]
 where = ["src"]
-
-[tool.setuptools.package-data]
-scannetpp_common = ["ATTRIBUTION.md"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

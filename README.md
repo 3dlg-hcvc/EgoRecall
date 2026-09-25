@@ -15,7 +15,7 @@ observation access with separate ground-truth supervision.
 | `src/egorecall/geometry/` | Shared camera and box records and intrinsic scaling |
 | `src/egorecall/arguments.py`, `src/egorecall/integrity.py` | Shared value checks, file/path helpers, and fingerprints |
 | `src/egorecall/cli/` | Command-line entry points |
-| `src/scannetpp_common/` | Attributed ScanNet++ toolkit adaptations |
+| `ATTRIBUTION.md` | Code adapted from the ScanNet++ toolkit |
 | `tests/` | Data, preparation, validation, and integration tests with shared fixtures |
 | `examples/` | Small examples using the public API |
 | `docs/` | GitHub Pages project website |
@@ -214,8 +214,7 @@ observations and all source object IDs, labels, and boxes. Mesh and segmentation
 files support operations such as visibility rendering; they are not needed to
 read a prepared scene's observations or supervision. DSLR assets and COLMAP
 reconstruction files are not required for preparation.
-Adapted toolkit helpers are documented in
-[scannetpp_common/ATTRIBUTION.md](src/scannetpp_common/ATTRIBUTION.md).
+Code adapted from the ScanNet++ toolkit is listed in [ATTRIBUTION.md](ATTRIBUTION.md).
 
 Check the raw inputs, then prepare scenes represented in a benchmark selection:
 
@@ -349,8 +348,8 @@ all work without a configured or accessible raw ScanNet++ directory after prepar
 
 For direct source access, use `ScanNetPPScene` from `egorecall.data.scannetpp`.
 Its `cameras(subsample_factor=10)` returns the camera records for every sampled frame,
-`objects()` returns all source geometry, and `paths` exposes mesh, segmentation,
-annotation, and iPhone filenames. Box axes are stored as rows, and box lengths
+`objects()` returns all source geometry, and attributes such as `iphone_video_path`
+and `scan_anno_json_path` locate the source files that preparation reads. Box axes are stored as rows, and box lengths
 are full side lengths in metres. `SceneH5` from `egorecall.data.scene_h5` provides
 full-timeline cache access and an `objects()` method for cached IDs, labels, and
 boxes. Object records returned by `objects()` own their geometry arrays, so
@@ -422,7 +421,7 @@ settings and documented behavior.
 
 Original EgoRecall code is distributed under the [MIT license](LICENSE),
 Copyright (c) 2026 3dlg-hcvc. ScanNet++ toolkit adaptations are identified in
-[their attribution file](src/scannetpp_common/ATTRIBUTION.md). EgoRecall dataset
+[ATTRIBUTION.md](ATTRIBUTION.md). EgoRecall dataset
 annotations use CC BY-NC 4.0 as stated in the dataset's own license and card.
 For code, dataset, or access questions, use
 [GitHub Issues](https://github.com/3dlg-hcvc/EgoRecall/issues).
