@@ -174,7 +174,7 @@ def raw_root(tmp_path: Path, ffmpeg_path: str) -> Path:
     for directory in (iphone, scans):
         directory.mkdir(parents=True)
 
-    # Source indices 0, 10, and 20 become the package's three canonical frames.
+    # Source indices 0, 10, and 20 become the package's three sampled frames.
     poses = {}
     rgb = np.zeros((21, 24, 32, 3), dtype=np.uint8)
     masks = np.zeros((21, 24, 32), dtype=np.uint8)

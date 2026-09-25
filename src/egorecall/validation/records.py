@@ -1,6 +1,6 @@
 """
-Validate one record at a time: JSON field types, required keys, and scene/object/frame
-identities in scene records, query rows, and scene annotations, plus table schemas.
+Validate one record at a time: JSON field types, required keys, and scene IDs, object IDs, and
+frame indices in scene records, query rows, and scene annotations, plus table schemas.
 """
 
 from typing import cast
@@ -69,7 +69,7 @@ def validate_scene(value: object) -> SceneRecord:
 
 def validate_annotations(value: object, scene_record: SceneRecord) -> SceneAnnotations:
     """
-    Validate a scene's annotation structure and object/frame identities.
+    Validate a scene's annotation structure, object IDs, and frame indices.
     Histories cover the complete scene timeline, including observations after
     individual query times.
 
@@ -85,8 +85,8 @@ def validate_annotations(value: object, scene_record: SceneRecord) -> SceneAnnot
     if type(record["schema_version"]) is not int or record["schema_version"] != 1:
         raise ValueError(f"{scene_id}: unsupported annotation schema_version.")
 
-    n_frames = require_integer(record["num_frames"], f"{scene_id}/num_frames", minimum=1)
-    if record["scene_id"] != scene_id or n_frames != scene_record["num_frames"]:
+    num_frames = require_integer(record["num_frames"], f"{scene_id}/num_frames", minimum=1)
+    if record["scene_id"] != scene_id or num_frames != scene_record["num_frames"]:
         raise ValueError(f"{scene_id}: annotation scene or timeline does not match scenes.json.")
 
     require_text(record["visibility_filter"], f"{scene_id}/visibility_filter")
@@ -99,18 +99,18 @@ def validate_annotations(value: object, scene_record: SceneRecord) -> SceneAnnot
     for oid, object_annotation in object_annotations.items():
         if not isinstance(oid, str) or not oid.isdecimal() or int(oid) <= 0 or str(int(oid)) != oid:
             raise ValueError(f"{scene_id}: invalid annotation object ID {oid!r}.")
-        _validate_object(object_annotation, n_frames, f"{scene_id}/{oid}")
+        _validate_object(object_annotation, num_frames, f"{scene_id}/{oid}")
 
     return cast(SceneAnnotations, record)
 
 
-def _validate_object(value: object, n_frames: int, context: str) -> None:
+def _validate_object(value: object, num_frames: int, context: str) -> None:
     """
     Check object field types and visibility indices against the scene timeline.
 
     Args:
         value: One decoded object annotation.
-        n_frames: Number of sampled frames in the scene.
+        num_frames: Number of sampled frames in the scene.
         context: Scene/object description used in errors.
     """
     object_annotation = require_fields(value, ObjectAnnotation.__required_keys__, context)
@@ -120,11 +120,11 @@ def _validate_object(value: object, n_frames: int, context: str) -> None:
     temporal = require_fields(object_annotation["temporal"], TemporalSummary.__required_keys__, f"{context}/temporal")
     for field in ("first_seen_frame", "last_seen_frame", "peak_visibility_frame"):
         frame = require_integer(temporal[field], f"{context}/{field}")
-        if frame >= n_frames:
+        if frame >= num_frames:
             raise ValueError(f"{context}/{field}: frame outside the sampled frame sequence.")
 
     count = require_integer(temporal["total_visible_frames"], f"{context}/total_visible_frames", minimum=1)
-    if count > n_frames:
+    if count > num_frames:
         raise ValueError(f"{context}: total_visible_frames exceeds the scene length.")
     require_number(temporal["peak_visible_area_frac"], f"{context}/peak_visible_area_frac")
 
@@ -137,7 +137,7 @@ def _validate_object(value: object, n_frames: int, context: str) -> None:
             raise ValueError(f"{context}: each visibility segment must contain two endpoints.")
         start = require_integer(segment[0], f"{context}/segment start")
         end = require_integer(segment[1], f"{context}/segment end")
-        if not start <= end < n_frames:
+        if not start <= end < num_frames:
             raise ValueError(f"{context}: invalid visibility segment bounds.")
 
     observations = object_annotation["per_frame"]
@@ -147,7 +147,7 @@ def _validate_object(value: object, n_frames: int, context: str) -> None:
         if not isinstance(frame_key, str) or not frame_key.isdecimal():
             raise ValueError(f"{context}: invalid observation frame {frame_key!r}.")
         frame_idx = int(frame_key)
-        if str(frame_idx) != frame_key or frame_idx >= n_frames:
+        if str(frame_idx) != frame_key or frame_idx >= num_frames:
             raise ValueError(f"{context}: observation frame outside the sampled frame sequence.")
 
         values = require_fields(statistics, FrameVisibility.__required_keys__, f"{context}/{frame_key}")
@@ -157,11 +157,11 @@ def _validate_object(value: object, n_frames: int, context: str) -> None:
 
 def validate_table(table: pa.Table, schema: pa.Schema, name: str) -> None:
     """
-    Require the expected Arrow columns/types and reject null fields at the read boundary.
+    Require the expected Arrow columns and types, and reject null values.
 
     Args:
-        table: Loaded table or column projection.
-        schema: Expected schema for those columns.
+        table: Table read from a Parquet file.
+        schema: Expected column names and types.
         name: Table description used in validation errors.
     """
     if not table.schema.equals(schema, check_metadata=False):

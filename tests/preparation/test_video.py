@@ -16,7 +16,7 @@ def test_video_selection_uses_source_indices(
     raw_root: Path, tmp_path: Path, ffmpeg_path: str, indices: tuple[int, ...]
 ) -> None:
     """
-    Select a nonzero singleton or irregular indices without shifting frame identities.
+    Select a nonzero singleton or irregular indices, keeping each output matched to its requested source frame.
 
     Args:
         raw_root: Synthetic video whose green channel encodes source time.

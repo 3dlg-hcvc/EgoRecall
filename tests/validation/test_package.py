@@ -32,7 +32,7 @@ def test_duplicate_keys_fail(package_root: Path, name: str) -> None:
 
 
 @pytest.mark.parametrize("name", ["stages", "frames"])
-def test_missing_join_row_fails(package_root: Path, name: str) -> None:
+def test_missing_table_row_fails(package_root: Path, name: str) -> None:
     """
     The checker detects a query without a stage assignment or a scene with a missing frame.
 
@@ -66,7 +66,7 @@ def test_wrong_query_schema_fails(package_root: Path) -> None:
 
 def test_invalid_query_time_fails(package_root: Path) -> None:
     """
-    A query outside its scene's canonical timeline is a data error.
+    A query time outside its scene's sampled frames is a data error.
 
     Args:
         package_root: Synthetic package to corrupt.
@@ -205,7 +205,7 @@ def test_manifest_split_mismatch_fails(package_root: Path) -> None:
 
 def test_manifest_counts_require_integers(package_root: Path) -> None:
     """
-    Require integer types for manifest population counts.
+    Require integer types for manifest counts.
 
     Args:
         package_root: Package whose query count will have the wrong type.

@@ -14,7 +14,7 @@ from egorecall.data.scene_h5 import CACHE_VERSION, SceneH5, object_geometry_sha2
 from egorecall.integrity import fingerprint_file
 from egorecall.validation.cache import validate_scene_cache
 from egorecall.validation.check import check_dataset, check_source_scenes
-from tests.helpers import _add_manifest_hashes
+from tests.helpers import add_manifest_hashes
 
 
 def test_stale_source_and_wrong_timeline_fail(raw_root: Path, prepared_cache: Path, ffmpeg_path: str) -> None:
@@ -98,7 +98,7 @@ def test_cache_geometry_is_compared_with_source(package_root: Path, raw_root: Pa
         cache["objects/centroid"][0] = objects[1].centroid
         cache["objects"].attrs["sha256"] = object_geometry_sha256(objects)
 
-    _add_manifest_hashes(package_root)
+    add_manifest_hashes(package_root)
     paths = DatasetPaths(package_root, raw_root, prepared_cache)
     assert check_dataset(paths, scene_ids=["scene_a"], check_cache=True).cache_scenes == 1
     with pytest.raises(ValueError, match="cached object geometry differs"):

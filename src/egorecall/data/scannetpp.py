@@ -37,7 +37,7 @@ def source_frame_index(name: str) -> int:
 class ScanNetPPScene:
     """
     Access one scene in an original ScanNet++ download. Source objects include
-    the complete annotation population; no EgoRecall visibility filter is applied.
+    every object in the ScanNet++ annotation; no EgoRecall visibility filter is applied.
     The iphone_* and scan_anno_json_path attributes locate the source files that
     preparation reads.
 

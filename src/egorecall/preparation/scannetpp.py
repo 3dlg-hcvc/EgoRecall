@@ -1,5 +1,5 @@
 """
-Prepare canonical observations and source object geometry in a local HDF5 scene cache.
+Prepare sampled RGB, depth, and mask images, cameras, and source object geometry in a local HDF5 scene cache.
 """
 
 import hashlib
@@ -35,9 +35,9 @@ def prepare_scene(
     ffmpeg: str = "ffmpeg",
 ) -> Path:
     """
-    Prepare all sampled images and source objects. Existing cache files are left in
-    place; use egorecall-check to verify them. A temporary file is published atomically; interrupted work
-    never replaces a completed cache. Source files are read from their original paths.
+    Prepare all sampled images and source objects. Existing cache files are left in place; use egorecall-check
+    to verify them. A temporary file is published atomically; interrupted work never replaces a completed cache.
+    Source files are read from their original paths.
 
     Args:
         source_scene: Scene in the original ScanNet++ download.
@@ -144,7 +144,7 @@ def _write_objects(h5_file: h5py.File, source_objects: dict[int, ObjectGeometry]
     group.create_dataset("object_id", data=np.array(ids, dtype=np.int64))
     group.create_dataset("label", data=[source_objects[oid].label for oid in ids], dtype=h5py.string_dtype("utf-8"))
 
-    # Every geometry column follows the same object-ID order, including empty populations.
+    # Every geometry column follows the same object-ID order, including scenes with no objects.
     for name, shape in OBJECT_ARRAY_SHAPES.items():
         values = np.array([getattr(source_objects[oid], name) for oid in ids], dtype=np.float64).reshape(
             len(ids), *shape

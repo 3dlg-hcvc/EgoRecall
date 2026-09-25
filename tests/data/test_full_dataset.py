@@ -14,7 +14,7 @@ from egorecall import DatasetPaths
 from egorecall.data import EgoRecallAnnotations
 from egorecall.validation.check import check_dataset
 from egorecall.validation.package import validate_annotation_package
-from tests.helpers import _add_manifest_hashes
+from tests.helpers import add_manifest_hashes
 
 
 @pytest.fixture
@@ -75,7 +75,7 @@ def full_package(package_root: Path) -> Path:
     }
     (package_root / "scenes.json").write_text(json.dumps(all_scene_records))
     (package_root / "manifest.json").write_text(json.dumps(manifest))
-    _add_manifest_hashes(package_root)
+    add_manifest_hashes(package_root)
     return package_root
 
 

@@ -16,7 +16,7 @@ from egorecall.validation.package import validate_annotation_package
 
 def test_stable_keys_and_stage_selection(package_root: Path) -> None:
     """
-    Join stage assignments using the scene/query ID pair across differing table orders.
+    Match stage assignments to queries by the scene/query ID pair across differing table orders.
 
     Args:
         package_root: Synthetic package with three stages and two scenes.

@@ -14,7 +14,7 @@ from egorecall import DatasetPaths
 from egorecall.data import EgoRecallDataset
 from egorecall.data.scannetpp import ScanNetPPScene
 from egorecall.validation.check import check_dataset
-from tests.helpers import _add_manifest_hashes
+from tests.helpers import add_manifest_hashes
 
 
 def test_annotation_operations_require_dataset_root() -> None:
@@ -130,7 +130,7 @@ def test_cached_geometry_survives_unavailable_raw_source(
             for name in ("centroid", "axes", "lengths", "minimum", "maximum"):
                 np.testing.assert_array_equal(getattr(actual, name), getattr(expected, name))
 
-    _add_manifest_hashes(package_root)
+    add_manifest_hashes(package_root)
     report = check_dataset(paths, scene_ids=["scene_a"], check_cache=True, decode_all=True)
     assert report.source_scenes == 0 and report.cache_scenes == 1 and report.frames_decoded == 3
 

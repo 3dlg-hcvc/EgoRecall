@@ -8,7 +8,7 @@ from pathlib import Path
 from egorecall.integrity import fingerprint_file
 
 
-def _add_manifest_hashes(root: Path) -> None:
+def add_manifest_hashes(root: Path) -> None:
     """
     Fingerprint synthetic package files for checksum-checker tests.
 

@@ -41,7 +41,7 @@ Decoded RGB has shape (height, width, 3) in RGB order, masks have shape (height,
 and depth has shape (192, 256) in uint16 millimetres, with zero indicating invalid depth.
 Depth intrinsics are computed by scaling the RGB intrinsics to the sensor-depth grid.
 Camera axes are x-right, y-down, z-forward in a mesh-aligned world with Z pointing up.
-Object rows are aligned by /objects/object_id and retain the complete source population.
+Object rows are aligned by /objects/object_id and include every source object.
 The objects checksum uses the sorted, compact JSON representation in object_geometry_sha256().
 """
 
@@ -206,7 +206,7 @@ class SceneH5:
         Read all cached source objects with independently owned geometry arrays.
 
         Returns:
-            Object IDs, labels, and boxes, including objects outside the EgoRecall filtered population.
+            Object IDs, labels, and boxes, including objects without EgoRecall visibility annotations.
         """
         return {oid: object_geometry.copy() for oid, object_geometry in self._objects.items()}
 
@@ -232,7 +232,7 @@ class SceneH5:
             frame_idx: Zero-based sampled frame index within the cache timeline.
 
         Returns:
-            Frame identity, timestamp, pose, and RGB/depth intrinsics with fresh arrays.
+            Frame index and name, timestamp, pose, and RGB/depth intrinsics with fresh arrays.
         """
         intrinsic = self._cameras.intrinsics[frame_idx].copy()
         return FrameCamera(

@@ -29,15 +29,15 @@ def main() -> None:
     # The model-facing sample contains only query text/time and the bounded history.
     with dataset.open_scene(args.scene) as scene_data:
         sample = scene_data.query(args.query)
-        frame = sample.observations.frame(sample.query.frame)
+        observation = sample.observations.frame(sample.query.frame)
 
         report = {
             "query": asdict(sample.query),
             "available_frames": len(sample.observations),
-            "last_frame_name": frame.frame_name,
-            "timestamp": frame.timestamp,
-            "rgb_shape": frame.rgb.shape,
-            "depth_shape": frame.depth.shape,
+            "last_frame_name": observation.frame_name,
+            "timestamp": observation.timestamp,
+            "rgb_shape": observation.rgb.shape,
+            "depth_shape": observation.depth.shape,
             "depth_units": "millimetres",
         }
 

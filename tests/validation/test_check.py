@@ -12,7 +12,7 @@ import pytest
 from egorecall import DatasetPaths
 from egorecall.validation.check import check_dataset
 from egorecall.validation.package import verify_package
-from tests.helpers import _add_manifest_hashes
+from tests.helpers import add_manifest_hashes
 
 
 def test_checker_source_cache_and_package(package_root: Path, raw_root: Path, prepared_cache: Path) -> None:
@@ -24,7 +24,7 @@ def test_checker_source_cache_and_package(package_root: Path, raw_root: Path, pr
         raw_root: Source download containing scene_a only.
         prepared_cache: Observation cache for scene_a.
     """
-    _add_manifest_hashes(package_root)
+    add_manifest_hashes(package_root)
     report = check_dataset(
         DatasetPaths(package_root, raw_root, prepared_cache),
         scene_ids=["scene_a"],
@@ -46,7 +46,7 @@ def test_checker_source_cache_and_package(package_root: Path, raw_root: Path, pr
         verify_package(package_root)
 
     # A listed payload must still match its recorded checksum after all required files are restored.
-    _add_manifest_hashes(package_root)
+    add_manifest_hashes(package_root)
     with (package_root / "scenes.json").open("a") as stream:
         stream.write("\n")
     with pytest.raises(ValueError, match="SHA-256"):
@@ -62,7 +62,7 @@ def test_checker_annotation_counts_fail(package_root: Path, name: str) -> None:
         package_root: Synthetic annotation package.
         name: Test-split count to corrupt.
     """
-    _add_manifest_hashes(package_root)
+    add_manifest_hashes(package_root)
     path = package_root / "manifest.json"
     manifest = json.loads(path.read_text())
     manifest["splits"]["test"]["counts"][name] += 1
@@ -128,7 +128,7 @@ def test_checker_selects_scenes_by_split_and_stage(package_root: Path, raw_root:
         raw_root: Source download containing scene_a only.
         prepared_cache: Observation cache for scene_a only.
     """
-    _add_manifest_hashes(package_root)
+    add_manifest_hashes(package_root)
     paths = DatasetPaths(package_root, raw_root, prepared_cache)
 
     # Stage 1 selects only the prepared scene; every query and scene annotation is still checked.
@@ -167,7 +167,7 @@ def test_invalid_checker_selection_fails(
         selection: Invalid scene-selection arguments for check_dataset().
         message: Expected error text.
     """
-    _add_manifest_hashes(package_root)
+    add_manifest_hashes(package_root)
     with pytest.raises(ValueError, match=message):
         check_dataset(DatasetPaths(package_root, cache_root=prepared_cache), **selection)
 
@@ -191,7 +191,7 @@ def test_checker_cli_selects_split_and_stages(
     """
     from egorecall.cli.check_dataset import main
 
-    _add_manifest_hashes(package_root)
+    add_manifest_hashes(package_root)
     config = tmp_path / "paths.toml"
     config.write_text(
         f"[paths]\ndataset_root = {json.dumps(str(package_root))}\ncache_root = {json.dumps(str(prepared_cache))}\n"

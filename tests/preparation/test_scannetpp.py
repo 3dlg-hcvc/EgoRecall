@@ -176,7 +176,7 @@ def test_failed_preparation_leaves_no_completed_cache(raw_root: Path, tmp_path: 
         prepare_scene(source_scene, raw_root / "cache", ffmpeg=ffmpeg_path)
 
 
-def test_empty_source_object_population(raw_root: Path, tmp_path: Path, ffmpeg_path: str) -> None:
+def test_scene_without_source_objects(raw_root: Path, tmp_path: Path, ffmpeg_path: str) -> None:
     """
     Preserve an explicitly empty source annotation instead of inventing geometry records.
 

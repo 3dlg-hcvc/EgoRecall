@@ -12,7 +12,7 @@ from egorecall.data.scannetpp import ScanNetPPScene
 from egorecall.preparation.scannetpp import prepare_scene
 from egorecall.validation.check import check_dataset
 from egorecall.validation.sources import validate_source_scene
-from tests.helpers import _add_manifest_hashes
+from tests.helpers import add_manifest_hashes
 
 
 @pytest.mark.parametrize("scene_id", ["../scene_a", "/scene_a", "missing"])
@@ -41,7 +41,7 @@ def test_source_checks_need_only_cache_inputs(package_root: Path, raw_root: Path
     """
     for name in ("mesh_aligned_0.05.ply", "segments.json"):
         (raw_root / "data/scene_a/scans" / name).unlink()
-    _add_manifest_hashes(package_root)
+    add_manifest_hashes(package_root)
     paths = DatasetPaths(package_root, raw_root, prepared_cache)
 
     report = check_dataset(paths, scene_ids=["scene_a"], check_source=True, check_cache=True, decode_all=True)
@@ -56,11 +56,11 @@ def test_source_checks_need_only_cache_inputs(package_root: Path, raw_root: Path
 @pytest.mark.parametrize(
     ("change", "message"), [("missing", "annotated objects have no ScanNet"), ("label", "labels differ")]
 )
-def test_source_object_join_fails(
+def test_annotated_object_mismatch_fails(
     package_root: Path, raw_root: Path, tmp_path: Path, ffmpeg_path: str, change: str, message: str
 ) -> None:
     """
-    Reject cached objects that are missing from, or inconsistent with, the annotation population.
+    Reject a cache that lacks an annotated object or gives it a different label.
 
     Args:
         package_root: Two-object visibility annotation.
@@ -80,6 +80,6 @@ def test_source_object_join_fails(
 
     cache_root = tmp_path / "changed_objects_cache"
     prepare_scene(ScanNetPPScene(raw_root, "scene_a"), cache_root, ffmpeg=ffmpeg_path)
-    _add_manifest_hashes(package_root)
+    add_manifest_hashes(package_root)
     with pytest.raises(ValueError, match=message):
         check_dataset(DatasetPaths(package_root, cache_root=cache_root), scene_ids=["scene_a"], check_cache=True)

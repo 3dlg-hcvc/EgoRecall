@@ -153,7 +153,7 @@ class StageBounds(TypedDict):
 
 class SplitManifest(TypedDict):
     """
-    Counts of queries, assignments, scenes, frames, and objects for one split.
+    Counts for one split: queries, stage assignments, frames, scenes, objects, and queries with any_target set.
     stages gives its inclusive first/last stage range, or None for training.
     """
 

@@ -101,7 +101,7 @@ class ObservationWindow:
             frame_idx: Zero-based sampled frame index within this query's history.
 
         Returns:
-            Frame identity, timestamp, pose, and RGB/depth intrinsics with fresh arrays.
+            Frame index and name, timestamp, pose, and RGB/depth intrinsics with fresh arrays.
         """
         return self._scene_h5.camera(self._frame_indices[frame_idx])
 
@@ -135,7 +135,7 @@ class QuerySample:
     Method-facing query and its bounded observation history.
 
     Args:
-        query: Query identity, text, and time only.
+        query: Query key, text, and time only.
         observations: History through the query frame, inclusive.
     """
 
@@ -227,7 +227,7 @@ class EgoRecallScene:
         scene_annotations = self._annotation_reader.get_annotations(self.scene_id)
         source_objects = self._scene_h5.objects()
         filtered_objects = {
-            int(object_id): source_objects[int(object_id)] for object_id in scene_annotations["objects"]
+            object_id: source_objects[object_id] for object_id in map(int, scene_annotations["objects"])
         }
         return SceneSupervision(scene_annotations, source_objects, filtered_objects)
 

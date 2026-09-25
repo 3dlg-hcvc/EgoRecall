@@ -121,7 +121,7 @@ def iter_depth_frames(path: Path, selected: set[int] | None = None) -> Iterator[
             except (zlib.error, ValueError):
                 first = None
 
-        # Rewind and decode the whole stream if the first block was invalid
+        # Rewind and decode the whole stream if the first block was invalid.
         if first is None:
             stream.seek(0)
             try:

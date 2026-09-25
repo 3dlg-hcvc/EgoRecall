@@ -43,13 +43,14 @@ def validate_scene_cache(path: Path, *, decode_all: bool = False) -> int:
         validate_cache_structure(h5_file)
         num_frames = len(h5_file["frames/names"])
         decoded_indices = range(num_frames) if decode_all else {0, num_frames - 1}
+        rgb_size = tuple(h5_file.attrs["rgb_resolution"])
         for frame_idx in range(num_frames):
             for image_kind, dataset_name in IMAGE_DATASETS.items():
                 payload = h5_file[f"frames/{dataset_name}"][frame_idx].tobytes()
                 expected = h5_file[f"frames/{dataset_name}_sha256"][frame_idx].decode("ascii")
                 if hashlib.sha256(payload).hexdigest() != expected:
                     raise ValueError(f"{path}: checksum mismatch at {image_kind} frame {frame_idx}.")
-                image_size = DEPTH_SIZE if image_kind == "depth" else tuple(h5_file.attrs["rgb_resolution"])
+                image_size = DEPTH_SIZE if image_kind == "depth" else rgb_size
                 validate_image(payload, image_kind, image_size)
                 if frame_idx in decoded_indices:
                     with Image.open(BytesIO(payload)) as image:
