@@ -5,7 +5,8 @@ from pathlib import Path
 import pytest
 
 from egorecall import DatasetPaths
-from egorecall.validation.check import check_dataset, verify_package
+from egorecall.validation.check import check_dataset
+from egorecall.validation.package import verify_package
 from tests.helpers import _add_manifest_hashes
 
 

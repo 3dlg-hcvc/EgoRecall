@@ -2,22 +2,17 @@
 Validate annotation files, raw ScanNet++ inputs, and prepared H5 caches before using the readers.
 """
 
-import json
 from dataclasses import dataclass
-from pathlib import Path
 
 import h5py
 
-from egorecall.arguments import require_integer
 from egorecall.config import DatasetPaths
 from egorecall.data.annotations import EgoRecallAnnotations, read_scene_records, select_scene_ids
 from egorecall.data.records import SceneAnnotations
 from egorecall.data.scannetpp import SOURCE_FPS, ScanNetPPScene
 from egorecall.data.scene_h5 import SceneH5
-from egorecall.integrity import fingerprint_file, relative_file
 from egorecall.validation.cache import validate_cache_compatibility, validate_scene_cache
-from egorecall.validation.manifest import manifest_splits
-from egorecall.validation.package import validate_annotation_package
+from egorecall.validation.package import validate_annotation_package, verify_package
 from egorecall.validation.sources import validate_object_annotations, validate_source_scene
 
 
@@ -41,45 +36,6 @@ class CheckReport:
     source_scenes: int
     cache_scenes: int
     frames_decoded: int
-
-
-def verify_package(root: Path) -> int:
-    """
-    Verify manifest byte counts and SHA-256 hashes, requiring coverage of all data
-    files used by the reader. File symlinks used by download caches are supported.
-
-    Args:
-        root: EgoRecall dataset directory.
-
-    Returns:
-        Number of files verified against the manifest.
-    """
-    with (root / "manifest.json").open(encoding="utf-8") as stream:
-        manifest = json.load(stream)
-    files = manifest["files"]
-    if not isinstance(files, dict) or not files:
-        raise ValueError("manifest/files must be a nonempty mapping of filenames to fingerprints.")
-
-    for name, expected in files.items():
-        path = relative_file(root, name)
-        require_integer(expected["bytes"], f"manifest/files/{name}/bytes")
-        actual = fingerprint_file(path)
-        if actual != expected:
-            raise ValueError(f"{name}: bytes or SHA-256 do not match manifest.json.")
-
-    # A valid checksum list must cover the tables and scene files used for loading.
-    required = {"scenes.json"}
-    for split in manifest_splits(manifest):
-        required.update((f"queries/{split}.parquet", f"frames/{split}.parquet"))
-        if split != "train":
-            required.add(f"stages/{split}.parquet")
-
-    with (root / "scenes.json").open(encoding="utf-8") as stream:
-        required.update(scene_record["annotations"] for scene_record in json.load(stream))
-    missing = required - files.keys()
-    if missing:
-        raise ValueError(f"Manifest omits required files: {sorted(missing)}.")
-    return len(files)
 
 
 def check_dataset(

@@ -1,22 +1,101 @@
 """
-Check annotation files before using the readers: required fields, matching IDs,
-frame numbering, query answers, visibility histories, and manifest totals.
+Check the annotation package as a whole before using the readers: file checksums and
+splits declared in manifest.json, matching IDs across the query, stage, and frame tables,
+visibility files, and manifest totals. Checks of single records are in validation/records.py.
 """
 
 import gzip
 import json
 from collections import Counter, defaultdict
 from pathlib import Path
+from typing import cast
 
 import pyarrow as pa
 import pyarrow.parquet as pq
 
 from egorecall.arguments import require_integer, require_text
-from egorecall.data.records import QueryRecord, SceneRecord, SplitManifest, decode_program
+from egorecall.data.records import SceneRecord, SplitManifest
 from egorecall.data.schema import FRAME_SCHEMA, QUERY_SCHEMA, STAGE_SCHEMA
-from egorecall.integrity import relative_file
-from egorecall.validation.manifest import manifest_splits
-from egorecall.validation.records import is_program, validate_annotations, validate_scene, validate_table
+from egorecall.integrity import fingerprint_file, relative_file
+from egorecall.validation.records import validate_annotations, validate_query, validate_scene, validate_table
+
+
+def verify_package(root: Path) -> int:
+    """
+    Verify manifest byte counts and SHA-256 hashes, requiring coverage of all data
+    files used by the reader. File symlinks used by download caches are supported.
+
+    Args:
+        root: EgoRecall dataset directory.
+
+    Returns:
+        Number of files verified against the manifest.
+    """
+    with (root / "manifest.json").open(encoding="utf-8") as stream:
+        manifest = json.load(stream)
+    files = manifest["files"]
+    if not isinstance(files, dict) or not files:
+        raise ValueError("manifest/files must be a nonempty mapping of filenames to fingerprints.")
+
+    for name, expected in files.items():
+        path = relative_file(root, name)
+        require_integer(expected["bytes"], f"manifest/files/{name}/bytes")
+        actual = fingerprint_file(path)
+        if actual != expected:
+            raise ValueError(f"{name}: bytes or SHA-256 do not match manifest.json.")
+
+    # A valid checksum list must cover the tables and scene files used for loading.
+    required = {"scenes.json"}
+    for split in manifest_splits(manifest):
+        required.update((f"queries/{split}.parquet", f"frames/{split}.parquet"))
+        if split != "train":
+            required.add(f"stages/{split}.parquet")
+
+    with (root / "scenes.json").open(encoding="utf-8") as stream:
+        required.update(scene_record["annotations"] for scene_record in json.load(stream))
+    missing = required - files.keys()
+    if missing:
+        raise ValueError(f"Manifest omits required files: {sorted(missing)}.")
+    return len(files)
+
+
+def manifest_splits(manifest: dict[str, object]) -> dict[str, SplitManifest]:
+    """
+    Check the splits mapping in manifest.json, then return each split's counts and stage range.
+    The manifest lists each split under splits and the whole dataset's totals under counts.
+
+    Args:
+        manifest: JSON object read from manifest.json.
+
+    Returns:
+        Records keyed by train, val, or test, each containing counts and an inclusive
+        first/last stage range. Training records have stages set to None.
+    """
+    version = require_integer(manifest["schema_version"], "manifest/schema_version", minimum=1)
+    if version != 2:
+        raise ValueError(f"Unsupported package schema_version: {version}.")
+    if not isinstance(manifest["counts"], dict):
+        raise ValueError("manifest/counts must contain a JSON object.")
+    splits = manifest["splits"]
+    if not isinstance(splits, dict) or not splits:
+        raise ValueError("manifest/splits must contain a nonempty split mapping.")
+
+    # Training has no stage assignments; validation and test need an inclusive stage range.
+    for split, split_manifest in splits.items():
+        if split not in ("train", "val", "test"):
+            raise ValueError(f"Unknown split {split!r}.")
+        if not isinstance(split_manifest["counts"], dict):
+            raise ValueError(f"manifest/splits/{split}/counts must contain a JSON object.")
+        stages = split_manifest["stages"]
+        if split == "train":
+            if stages is not None:
+                raise ValueError("Training must be unstaged.")
+        else:
+            if not isinstance(stages, dict):
+                raise ValueError(f"{split}: manifest stages must contain first/last bounds.")
+            first = require_integer(stages["first"], f"manifest/splits/{split}/stages/first", minimum=1)
+            require_integer(stages["last"], f"manifest/splits/{split}/stages/last", minimum=first)
+    return cast(dict[str, SplitManifest], splits)
 
 
 def validate_frame_mapping(frame_table: pa.Table, scene_records: dict[str, SceneRecord]) -> None:
@@ -205,48 +284,3 @@ def _validate_split(
             raise ValueError(f"manifest/splits/{split}/counts/{name}: declared {declared}, found {actual}.")
 
     return observed
-
-
-def validate_query(query: QueryRecord, scene_record: SceneRecord) -> None:
-    """
-    Check query time against the scene's frame count, validate the target-ID
-    partition, and check the nested program representation.
-
-    Args:
-        query: Query row to check.
-        scene_record: Counts and settings for the scene containing the query.
-    """
-    scene_id, query_idx = query["scene_id"], query["query_idx"]
-    context = f"{scene_id}/{query_idx}"
-    frame = require_integer(query["frame"], f"{context}/frame")
-    if frame >= scene_record["num_frames"]:
-        raise ValueError(f"{context}: query frame is outside the scene frame range.")
-
-    require_text(query["description"], f"{context}/description")
-    require_text(query["source_query_id"], f"{context}/source_query_id")
-
-    reason = query["emit_reason"]
-    if reason not in ("new", "answer_change", "rebirth"):
-        raise ValueError(f"{context}: unknown emit_reason {reason!r}.")
-
-    # Every target occurs once, and visible/hidden IDs partition the answer.
-    for field in ("target_oids", "visible_target_oids", "hidden_target_oids"):
-        ids = query[field]
-        for oid in ids:
-            require_integer(oid, f"{context}/{field}", minimum=1)
-        if len(ids) != len(set(ids)):
-            raise ValueError(f"{context}: duplicate object IDs in {field}.")
-
-    targets = set(query["target_oids"])
-    visible, hidden = set(query["visible_target_oids"]), set(query["hidden_target_oids"])
-    if not targets or targets != visible | hidden or visible & hidden:
-        raise ValueError(f"{context}: visible/hidden IDs do not partition the target IDs.")
-
-    # Validate program metadata and its nested representation together.
-    require_integer(query["program_depth"], f"{context}/program_depth", minimum=1)
-    try:
-        program = decode_program(query["program_json"])
-        if not is_program(program):
-            raise ValueError("Invalid program structure.")
-    except ValueError as error:
-        raise ValueError(f"{context}: invalid program_json: {error}") from error

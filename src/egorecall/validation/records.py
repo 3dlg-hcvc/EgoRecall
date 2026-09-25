@@ -1,6 +1,6 @@
 """
-Validate JSON field types, required keys, and scene/object/frame identities
-before returning typed annotation records.
+Validate one record at a time: JSON field types, required keys, and scene/object/frame
+identities in scene records, query rows, and scene annotations, plus table schemas.
 """
 
 from typing import cast
@@ -8,7 +8,15 @@ from typing import cast
 import pyarrow as pa
 
 from egorecall.arguments import require_integer, require_number, require_text
-from egorecall.data.records import FrameVisibility, ObjectAnnotation, SceneAnnotations, SceneRecord, TemporalSummary
+from egorecall.data.records import (
+    FrameVisibility,
+    ObjectAnnotation,
+    QueryRecord,
+    SceneAnnotations,
+    SceneRecord,
+    TemporalSummary,
+    decode_program,
+)
 
 
 def require_fields(value: object, fields: frozenset[str], context: str) -> dict[str, object]:
@@ -176,3 +184,48 @@ def is_program(value: object) -> bool:
     if not isinstance(value, list) or not value or not isinstance(value[0], str) or not value[0]:
         return False
     return all(type(item) in (str, int) or is_program(item) for item in value[1:])
+
+
+def validate_query(query: QueryRecord, scene_record: SceneRecord) -> None:
+    """
+    Check query time against the scene's frame count, validate the target-ID
+    partition, and check the nested program representation.
+
+    Args:
+        query: Query row to check.
+        scene_record: Counts and settings for the scene containing the query.
+    """
+    scene_id, query_idx = query["scene_id"], query["query_idx"]
+    context = f"{scene_id}/{query_idx}"
+    frame = require_integer(query["frame"], f"{context}/frame")
+    if frame >= scene_record["num_frames"]:
+        raise ValueError(f"{context}: query frame is outside the scene frame range.")
+
+    require_text(query["description"], f"{context}/description")
+    require_text(query["source_query_id"], f"{context}/source_query_id")
+
+    reason = query["emit_reason"]
+    if reason not in ("new", "answer_change", "rebirth"):
+        raise ValueError(f"{context}: unknown emit_reason {reason!r}.")
+
+    # Every target occurs once, and visible/hidden IDs partition the answer.
+    for field in ("target_oids", "visible_target_oids", "hidden_target_oids"):
+        ids = query[field]
+        for oid in ids:
+            require_integer(oid, f"{context}/{field}", minimum=1)
+        if len(ids) != len(set(ids)):
+            raise ValueError(f"{context}: duplicate object IDs in {field}.")
+
+    targets = set(query["target_oids"])
+    visible, hidden = set(query["visible_target_oids"]), set(query["hidden_target_oids"])
+    if not targets or targets != visible | hidden or visible & hidden:
+        raise ValueError(f"{context}: visible/hidden IDs do not partition the target IDs.")
+
+    # Validate program metadata and its nested representation together.
+    require_integer(query["program_depth"], f"{context}/program_depth", minimum=1)
+    try:
+        program = decode_program(query["program_json"])
+        if not is_program(program):
+            raise ValueError("Invalid program structure.")
+    except ValueError as error:
+        raise ValueError(f"{context}: invalid program_json: {error}") from error
