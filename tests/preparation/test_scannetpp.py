@@ -69,23 +69,23 @@ def test_preparation_without_annotations_needs_only_cache_inputs(
     assert "requires dataset_root" in capsys.readouterr().err
 
 
-def test_preparation_uses_only_scene_metadata(
+def test_preparation_selects_scenes_by_stage(
     package_root: Path, raw_root: Path, tmp_path: Path, ffmpeg_path: str, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """
-    Prepare an annotated scene without loading query contents or visibility files.
+    Prepare every scene of a stage selection through the CLI, using the frame names from the
+    annotation package. Visibility files are not read during preparation.
 
     Args:
-        package_root: Metadata package whose query and visibility payloads will be removed.
-        raw_root: Source scene matching the package's timeline.
+        package_root: Package whose stage 1 contains scene_a only; its visibility files will be removed.
+        raw_root: Source download containing scene_a only.
         tmp_path: Configuration and cache parent.
         ffmpeg_path: FFmpeg executable.
         monkeypatch: Fixture supplying CLI arguments.
     """
-    (package_root / "queries/test.parquet").unlink()
     for path in (package_root / "annotations").iterdir():
         path.unlink()
-    cache_root = tmp_path / "metadata_cache"
+    cache_root = tmp_path / "stage_cache"
     config = tmp_path / "paths.toml"
     config.write_text(
         f"[paths]\ndataset_root = {json.dumps(str(package_root))}\n"
@@ -103,14 +103,13 @@ def test_preparation_uses_only_scene_metadata(
             "test",
             "--stages",
             "1",
-            "--scenes",
-            "scene_a",
             "--ffmpeg",
             ffmpeg_path,
         ],
     )
     prepare_scannetpp.main()
 
+    # Stage 1 selects scene_a only, so scene_b is neither read from the source nor prepared.
     with SceneH5(cache_root / "scene_a.h5") as cache:
         assert cache.frame_names == ("frame_000000", "frame_000010", "frame_000020")
         assert cache.observation(1).depth[0, 0] == 1010

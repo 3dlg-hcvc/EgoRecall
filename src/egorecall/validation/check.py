@@ -2,7 +2,6 @@
 Validate annotation files, raw ScanNet++ inputs, and prepared H5 caches before using the readers.
 """
 
-import gzip
 import json
 from dataclasses import dataclass
 from pathlib import Path
@@ -11,7 +10,7 @@ import h5py
 
 from egorecall.arguments import require_integer
 from egorecall.config import DatasetPaths
-from egorecall.data.metadata import SceneMetadata, load_scene_metadata, read_scene_records, select_scene_ids
+from egorecall.data.annotations import EgoRecallAnnotations, read_scene_records, select_scene_ids
 from egorecall.data.records import SceneAnnotations
 from egorecall.data.scannetpp import SOURCE_FPS, ScanNetPPScene
 from egorecall.data.scene_h5 import SceneH5
@@ -128,41 +127,43 @@ def check_dataset(
     split_counts = validate_annotation_package(paths.dataset_root)
 
     # Select scenes as preparation does: from one split and its stages, or by scene ID across every split.
-    metadata_by_scene: dict[str, SceneMetadata] = {}
+    requested_by_split: dict[str, list[str] | None] = {}
     if split is not None:
-        metadata_by_scene = load_scene_metadata(paths.dataset_root, split, stages=stages, scene_ids=scene_ids)
+        requested_by_split[split] = scene_ids
     elif check_source or check_cache:
         scene_records = read_scene_records(paths.dataset_root)
         selected_ids = select_scene_ids(tuple(sorted(scene_records)), scene_ids)
         for split_name in split_counts:
             split_scene_ids = [scene_id for scene_id in selected_ids if scene_records[scene_id]["split"] == split_name]
             if split_scene_ids:
-                metadata_by_scene.update(load_scene_metadata(paths.dataset_root, split_name, scene_ids=split_scene_ids))
+                requested_by_split[split_name] = split_scene_ids
 
-    # Compare each selected scene's source files or prepared cache with its annotations.
+    # Compare each selected scene's source files or prepared cache with its annotations, one split at a time.
+    scenes_checked = 0
     frames_decoded = 0
-    for scene_id, scene_meta in metadata_by_scene.items():
-        scene_record = scene_meta.scene_record
-        with gzip.open(paths.dataset_root / scene_record["annotations"], "rt", encoding="utf-8") as stream:
-            scene_annotations = json.load(stream)
-        frames_decoded += _check_scene_assets(
-            paths,
-            scene_id,
-            scene_record["subsample_factor"],
-            scene_record["source_fps"],
-            frame_names=scene_meta.frame_names,
-            scene_annotations=scene_annotations,
-            check_source=check_source,
-            check_cache=check_cache,
-            decode_all=decode_all,
-        )
+    for split_name, requested_ids in requested_by_split.items():
+        annotation_reader = EgoRecallAnnotations(paths.dataset_root, split=split_name, stages=stages)
+        for scene_id in select_scene_ids(annotation_reader.scene_ids, requested_ids):
+            scene_record = annotation_reader.get_scene(scene_id)
+            frames_decoded += _check_scene_assets(
+                paths,
+                scene_id,
+                scene_record["subsample_factor"],
+                scene_record["source_fps"],
+                frame_names=annotation_reader.frame_names(scene_id),
+                scene_annotations=annotation_reader.get_annotations(scene_id),
+                check_source=check_source,
+                check_cache=check_cache,
+                decode_all=decode_all,
+            )
+            scenes_checked += 1
 
     return CheckReport(
         files_verified,
         sum(counts["queries"] for counts in split_counts.values()),
         sum(counts["scenes"] for counts in split_counts.values()),
-        len(metadata_by_scene) if check_source else 0,
-        len(metadata_by_scene) if check_cache else 0,
+        scenes_checked if check_source else 0,
+        scenes_checked if check_cache else 0,
         frames_decoded,
     )
 

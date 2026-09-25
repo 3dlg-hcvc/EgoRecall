@@ -12,6 +12,7 @@ import pyarrow.parquet as pq
 import pytest
 
 from egorecall.data import EgoRecallAnnotations, decode_program, parse_stages
+from egorecall.data.annotations import select_scene_ids
 from egorecall.validation.package import validate_annotation_package
 
 
@@ -402,4 +403,72 @@ def test_readers_do_not_repeat_package_audit(package_root: Path) -> None:
     assert len(annotation_reader) == 4
     assert annotation_reader.get_query("scene_a", 4)["target_oids"] == [1]
     with pytest.raises(ValueError, match="manifest/counts/queries"):
+        validate_annotation_package(package_root)
+
+
+def test_scene_selection_keeps_requested_order(package_root: Path) -> None:
+    """
+    Select requested scenes from a stage selection in the caller's order, or all selected scenes when omitted.
+
+    Args:
+        package_root: Package whose stage 2 contains scene_a and scene_b.
+    """
+    annotation_reader = EgoRecallAnnotations(package_root, stages=2)
+    assert select_scene_ids(annotation_reader.scene_ids, None) == ("scene_a", "scene_b")
+    assert select_scene_ids(annotation_reader.scene_ids, ["scene_b", "scene_a"]) == ("scene_b", "scene_a")
+
+
+@pytest.mark.parametrize("scene_ids", [[], ["scene_a", "scene_a"], ["missing"], ["scene_b"]])
+def test_invalid_scene_selection_fails(package_root: Path, scene_ids: list[str]) -> None:
+    """
+    Reject empty, repeated, unknown, and stage-excluded scene requests.
+
+    Args:
+        package_root: Package whose stage 1 contains scene_a only.
+        scene_ids: Invalid scene subset.
+    """
+    annotation_reader = EgoRecallAnnotations(package_root, stages=1)
+    with pytest.raises((ValueError, KeyError)):
+        select_scene_ids(annotation_reader.scene_ids, scene_ids)
+
+
+def test_incomplete_frame_mapping_fails(package_root: Path) -> None:
+    """
+    Fail when a selected scene lacks a frame row, instead of pairing queries with the wrong images.
+
+    Args:
+        package_root: Package whose first frame row will be removed.
+    """
+    path = package_root / "frames/test.parquet"
+    table = pq.read_table(path)
+    pq.write_table(table.slice(1), path)
+    with pytest.raises(KeyError):
+        EgoRecallAnnotations(package_root, stages=1)
+
+
+@pytest.mark.parametrize("change", ["scene", "split", "stage_gap", "null"])
+def test_invalid_stage_table_fails(package_root: Path, change: str) -> None:
+    """
+    Reject unknown scenes, wrong splits, unavailable stages, and null fields in the stage table.
+
+    Args:
+        package_root: Package to corrupt.
+        change: Stage-table inconsistency to introduce while preserving its row count.
+    """
+    path = package_root / "stages/test.parquet"
+    table = pq.read_table(path)
+    rows = table.to_pylist()
+    if change == "scene":
+        rows[0]["scene_id"] = "unknown"
+    elif change == "split":
+        rows[0]["split"] = "val"
+    elif change == "stage_gap":
+        for row in rows:
+            if row["stage"] == 2:
+                row["stage"] = 3
+    else:
+        rows[0]["stage"] = None
+    pq.write_table(pa.Table.from_pylist(rows, schema=table.schema), path)
+
+    with pytest.raises((ValueError, KeyError)):
         validate_annotation_package(package_root)

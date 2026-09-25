@@ -235,9 +235,9 @@ annotation frame table. `egorecall-check` accepts the same `--split` and
 egorecall-check --config configs/paths.toml --cache --split test --stages 1
 ```
 
-Preparation reads `scenes.json` and the selected scenes' frame mappings.
-With `--stages`, it reads scene IDs and stage numbers from the assignment table.
-Query text, answers, and object visibility files are not needed for preparation.
+Preparation selects scenes with `EgoRecallAnnotations`, the same reader as the
+Python API, and takes each scene's sampling settings and frame names from it.
+Object visibility files are not read during preparation.
 
 Each scene produces `cache_root/<scene_id>.h5`, containing encoded RGB JPEGs,
 sensor-depth PNGs, anonymization-mask PNGs, camera matrices, timestamps, and all

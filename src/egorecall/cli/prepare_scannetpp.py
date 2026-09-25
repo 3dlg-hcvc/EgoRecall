@@ -6,7 +6,7 @@ import argparse
 from pathlib import Path
 
 from egorecall.config import DatasetPaths
-from egorecall.data.metadata import load_scene_metadata
+from egorecall.data.annotations import EgoRecallAnnotations, select_scene_ids
 from egorecall.data.scannetpp import ScanNetPPScene
 from egorecall.preparation.scannetpp import prepare_scene
 
@@ -34,7 +34,7 @@ def main() -> None:
 
     # Use scene selection and sampling settings from the annotation package,
     # or take them directly from the command line when preparing without annotations.
-    metadata_by_scene = None
+    annotation_reader: EgoRecallAnnotations | None = None
     if args.without_annotations:
         if not args.scenes or args.subsample_factor is None or args.split is not None or args.stages is not None:
             parser.error("--without-annotations requires --scenes and --subsample-factor, without --split or --stages.")
@@ -49,29 +49,26 @@ def main() -> None:
         if paths.dataset_root is None:
             parser.error("Preparation with annotations requires dataset_root in the configuration.")
 
-        metadata_by_scene = load_scene_metadata(
-            paths.dataset_root, args.split, stages=args.stages, scene_ids=args.scenes
-        )
-        scene_ids = tuple(metadata_by_scene)
+        annotation_reader = EgoRecallAnnotations(paths.dataset_root, split=args.split, stages=args.stages)
+        scene_ids = select_scene_ids(annotation_reader.scene_ids, args.scenes)
 
     # Prepare all frames for each selected scene, leaving existing cache files in place.
     for scene_id in scene_ids:
         source_scene = ScanNetPPScene(paths.scannetpp_root, scene_id)
         print(f"Preparing {scene_id}...", flush=True)
 
-        if metadata_by_scene is None:
+        if annotation_reader is None:
             output = prepare_scene(
                 source_scene, paths.cache_root, subsample_factor=args.subsample_factor, ffmpeg=args.ffmpeg
             )
         else:
-            scene_meta = metadata_by_scene[scene_id]
-            scene_record = scene_meta.scene_record
+            scene_record = annotation_reader.get_scene(scene_id)
             output = prepare_scene(
                 source_scene,
                 paths.cache_root,
                 subsample_factor=scene_record["subsample_factor"],
                 source_fps=scene_record["source_fps"],
-                frame_names=scene_meta.frame_names,
+                frame_names=annotation_reader.frame_names(scene_id),
                 ffmpeg=args.ffmpeg,
             )
 
