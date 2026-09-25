@@ -5,7 +5,7 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "egorecall"
 version = "0.1.0"
-description = "Data access for the EgoRecall temporal grounding benchmark"
+description = "EgoRecall: 3D Visual Grounding from Streaming Egocentric Observations"
 readme = "README.md"
 requires-python = ">=3.12"
 license = "MIT"
