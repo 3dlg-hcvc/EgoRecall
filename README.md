@@ -156,5 +156,5 @@ Please also cite [ScanNet++](https://scannetpp.mlsg.cit.tum.de/scannetpp/) if yo
 
 
 ## Acknowledgements
-This work was funded in part by a Canada Research Chair, NSERC Discovery Grants, and enabled by support from the [Digital Research Alliance of Canada](https://alliancecan.ca/).
+This work was funded in part by a Canada Research Chair, NSERC Discovery Grants, and enabled by support from the [Digital Research Alliance of Canada](https://alliancecan.ca/), and an NVIDIA Academic Grant Award.
 We thank Austin T. Wang, Denys Iliash, and Weikun Peng for helpful feedback and discussions.

@@ -72,7 +72,7 @@
                   </a>
                 </span> -->
                 <span class="link-block">
-                  <a href="https://arxiv.org/abs/2408.02211" class="external-link button is-normal is-rounded is-dark">
+                  <a href="" class="external-link button is-normal is-rounded is-dark">
                     <span class="icon">
                       <i class="ai ai-arxiv"></i>
                     </span>
@@ -80,17 +80,17 @@
                   </a>
                 </span>
                 <!-- Video Link. -->
-                <span class="link-block">
+                <!-- <span class="link-block">
                   <a href="https://youtu.be/iXsx18R7NN8" class="external-link button is-normal is-rounded is-dark">
                     <span class="icon">
                       <i class="fab fa-youtube"></i>
                     </span>
                     <span>Video</span>
                   </a>
-                </span>
+                </span> -->
                 <!-- Code Link. -->
                 <span class="link-block">
-                  <a href="https://github.com/3dlg-hcvc/smc" class="external-link button is-normal is-rounded is-dark">
+                  <a href="https://github.com/3dlg-hcvc/EgoRecall" class="external-link button is-normal is-rounded is-dark">
                     <span class="icon">
                       <i class="fab fa-github"></i>
                     </span>
@@ -99,7 +99,7 @@
                 </span>
                 <!-- Dataset Link. -->
                 <span class="link-block">
-                <a href="https://github.com/3dlg-hcvc/smc/releases/download/v1.0/examples.zip" class="external-link button is-normal is-rounded is-dark">
+                <a href="https://huggingface.co/datasets/3dlg-hcvc/EgoRecall" class="external-link button is-normal is-rounded is-dark">
                   <span class="icon">
                       <i class="far fa-images"></i>
                   </span>
@@ -115,50 +115,55 @@
     </div>
   </section>
 
-  <section class="section">
-    <div class="container is-max-widescreen">
+  <!-- <section class="section"> -->
+    <!-- <div class="container is-max-widescreen"> -->
       <!-- Paper video. -->
-      <div class="columns is-centered has-text-centered">
-        <div class="column is-four-fifths">
+      <!-- <div class="columns is-centered has-text-centered"> -->
+        <!-- <div class="column is-four-fifths"> -->
           <!-- <h2 class="title is-3">Video</h2> -->
-          <div class="publication-video">
-            <iframe src="https://www.youtube-nocookie.com/embed/iXsx18R7NN8?si=EGAyTEm72OAejuYc" frameborder="0" allow="autoplay; encrypted-media" allowfullscreen></iframe>
-          </div>
-        </div>
-      </div>
+          <!-- <div class="publication-video"> -->
+            <!-- <iframe src="" frameborder="0" allow="autoplay; encrypted-media" allowfullscreen></iframe> -->
+          <!-- </div> -->
+        <!-- </div> -->
+      <!-- </div> -->
       <!--/ Paper video. -->
-    </div>  
-  </section>
+    <!-- </div>   -->
+  <!-- </section> -->
 
   <section class="section">
     <div class="container is-max-widescreen">
       <div class="columns is-centered">
+        
+
+        <div class="column is-full-width is-large">
+          <div class="center-container">
+            <img src="./static/images/teaser.webp" alt="Streaming egocentric 3D visual grounding">
+          </div>
 
         <!-- Abstract. --> 
         <div class="column is-full-width is-large">
           <div class="column has-text-centered">
 
-            <div class="center-container" style="margin-left: -10px">
-              <!-- <h2 class="title is-3">Abstract</h2> -->
-              <video autoplay playsinline muted loop controls>
-                <source src="./static/images/teaser.mov">
-              </video>
-            </div>
+            <div class="center-container">
+              <!-- <img src="./static/images/teaser.webp" alt="Streaming egocentric 3D visual grounding"> -->
+              <br>
 
+              <h2 class="title is-3">Abstract</h2>
+            </div>
+            
             <div class="content has-text-justified mt-4">
               <p>
-                Despite recent advances in text-to-3D generation methods, generation of multi-object arrangements remains challenging. 
-                Current methods exhibit failures in generating physically plausible arrangements that respect the provided text description.
+                We introduce streaming egocentric 3D visual grounding, where an agent resolves referring expressions using only the partial observation history available at query time.
+                Unlike conventional 3DVG, which assumes a complete scene representation, queries may depend on when and how objects were encountered as well as their spatial relationships.
               </p>
               <p>
-                We present SceneMotifCoder (SMC), an example-driven framework for generating 3D object arrangements through visual program learning. 
-                SMC leverages recent advances in large language models (LLMs) and program synthesis to overcome these challenges by learning visual programs from example arrangements. 
-                These programs are generalized into compact, editable meta-programs. When combined with 3D object retrieval and geometry-aware optimization, 
-                they can be used to create object arrangements varying in arrangement structure and contained objects.
+                We present EgoRecall, the first benchmark for this task, comprising 2.25M timestamped queries generated by a compositional DSL over observation history, egocentric relationships, and allocentric structure.
+                Queries are defined with respect to the observations available at their timestamps and may refer to either currently visible or previously observed objects, requiring persistent scene memory.
               </p>
               <p>
-                Our experiments show that SMC generates high-quality arrangements using meta-programs learned from few examples. 
-                Evaluation results demonstrate that object arrangements generated by SMC better conform to user-specified text descriptions and are more physically plausible when compared with state-of-the-art text-to-3D generation methods.
+                We evaluate VLM-, 3D-, and memory-based methods under protocols that separate perception from grounding.
+                The task is challenging with our strongest system achieving only 14.1 F1.
+                Our experiments show that modeling observation history and camera-relative relationships improves performance, but targets no longer visible remain particularly challenging.
               </p>
             </div>
 
@@ -167,33 +172,63 @@
         <!--/ Abstract. -->
       </div>
     </div>
+    </div>
   </section>
 
   <section class="section">
     <div class="container is-max-widescreen">
-      <!-- Methods. -->
+      <!-- Reference axes. -->
       <div class="columns is-centered">
         <div class="column is-full-width">
           <div class="content has-text-justified">
             <div class="center-container">
-              <h3 class="title is-3">Method Overview</h3>
+              <h3 class="title is-3">Three Axes of Reference in Our Setting</h3>
             </div>
             <p>
-              The SceneMotifCoder (SMC) framework operates in two phases.
-              <b>Top</b>: In the learning phase, given an object arrangement and its text description, SMC extracts a naïve program which is refined into a more structured motif program.
-              The spatial patterns in the motif are then abstracted into a meta-program with reusable arguments to enable editing and generalization.
-              <b>Bottom</b>: In the inference phase, given a text description as input, SMC selects a meta-program from the program library.
-              Then, a new object arrangement is generated by writing a function call that executes the meta-program with appropriate arguments.
-              Mesh retrieval and geometry-aware optimization then produces the final output which is a new object arrangement conforming to the input description.
+              Consider a user wearing smart glasses in an unfamiliar office building.
+              After walking through several rooms, they ask their assistant to guide them back to <i>"the cabinet to the right of the first sink I encountered."</i>
+              Answering requires finding the first sink in the user's observation history, recovering the viewpoint from which it was seen, and locating the cabinet to its right, even though both objects may have long left the field of view.
             </p>
-            <video autoplay playsinline muted loop controls>
-              <source src="./static/images/method.mov">
-            </video>
+            <p>
+              EgoRecall queries combine three axes of reference.
+              <i>Observation history</i> identifies objects by when and how they were encountered, such as the first or the most recently seen one.
+              <i>Egocentric relationships</i> are spatial relations relative to the observer's viewpoint, such as to the left or closer to me.
+              <i>Allocentric structure</i> captures relations that do not depend on the viewpoint, such as next to or above.
+            </p>
+            <img src="./static/images/axes.webp" alt="Observation history, egocentric relationships, and allocentric structure">
           </div>
-        </div> 
-      </div>  
-    </div> 
-    <!--/ Methods. -->
+        </div>
+      </div>
+    </div>
+    <!--/ Reference axes. -->
+  </section>
+
+  <section class="section">
+    <div class="container is-max-widescreen">
+      <!-- Dataset. -->
+      <div class="columns is-centered">
+        <div class="column is-full-width">
+          <div class="content has-text-justified">
+            <div class="center-container">
+              <h3 class="title is-3">Dataset</h3>
+            </div>
+            <p>
+              EgoRecall is built from <a href="https://scannetpp.mlsg.cit.tum.de/scannetpp/">ScanNet++</a> scenes, which provide instance-annotated 3D reconstructions, RGB-D captures, and camera trajectories.
+              For each scene, we replay the capture at 6 FPS and rasterize the annotated mesh to record which objects are visible in every frame.
+              A domain-specific language (DSL) with 22 operators composes programs over these visibility records.
+              Running a program at a query time gives its ground-truth targets using only what has been observed so far, and each program is verbalized into a referring expression, such as <i>"the box to the left of the first chair I saw."</i>
+            </p>
+            <p>
+              EgoRecall contains 2.25M queries over 183 scenes, split into 100 training, 13 validation, and 70 test scenes, and covers 12.1 hours of video and 21,331 objects from 1,366 categories.
+              Most queries are compositional, with 82% combining two or more operators.
+              Most also require memory: for 65% of queries, no target is in view at query time, and for another 15%, only some targets are.
+            </p>
+            <img src="./static/images/dataset.webp" alt="EgoRecall dataset construction and statistics">
+          </div>
+        </div>
+      </div>
+    </div>
+    <!--/ Dataset. -->
   </section>
 
   <section class="section">
@@ -203,130 +238,27 @@
 
         <h3 class="title is-3">Results</h3>
 
-
-
         <div class="content has-text-justified">
-          <h4 class="title is-4">Learned Meta-Program Example</h4>
           <p>
-            Example of meta-program for <i>surround</i> motif learned from the text and arrangement pair in blue box. 
-            The arrangements at the bottom are generated from the meta-program given the input text shown above each arrangement.
-            Note the significant variations in object counts and types, all captured by human-interpretable and editable calls to the meta-program.
+            We evaluate five methods from four families, each given only the observations up to the query time: a VLM that points at objects in past frames (Qwen 3.8-27B), memory-free 3D grounding (Qwen3D), scene-graph memories (DAAAM and DirectMe), and a learned object-centric memory (MTU3D).
+            We also fine-tune MTU3D on EgoRecall with added encoders for viewpoint, recency, and observation history, and call the result EgoR-MTU3D.
+          </p>
+          <p>
+            EgoRecall is far from solved.
+            On 10,000 test queries, the best method, EgoR-MTU3D, reaches only 14.1 F1.
+            Remembered targets are harder than visible ones: EgoR-MTU3D drops from 16.8 F1 when all targets are in view to 11.8 when all have left it.
+            Perception also limits memory-based methods: DirectMe improves from 0.5 to 8.7 F1 when given ground-truth camera poses and depth.
+          </p>
+          <h4 class="title is-4 mt-6">Qualitative Examples</h4>
+          <p>
+            All three targets below are out of view at query time.
+            Green boxes mark the ground truth or correct predictions, and red boxes mark incorrect ones.
+            <b>Top</b>: methods with persistent object memory find the cabinet after a 414-second observation history, while methods without it fail.
+            <b>Bottom left</b>: the viewpoint encoder lets MTU3D find the remembered table instead of the tables in view.
+            <b>Bottom right</b>: pose drift makes DirectMe pick the wrong pillow, which ground-truth poses fix.
           </p>
         </div>
-        <video autoplay playsinline muted loop controls>
-          <source src="./static/images/program.mov">
-        </video>
-
-
-
-        <div class="content has-text-justified">
-          <h4 class="title is-4 mt-6">Comparison with Prior Work</h4>
-          <p>
-            The text at each row on the left is the input at inference time.
-            The arrangements generated by SceneMotifCoder better respect the input text in terms of number and type of objects present, and exhibit more plausible spatial configurations and object appearance.
-          </p>
-        </div>
-
-        <div class="rows is-vcentered is-mobile" style="margin-bottom: 0px;">
-          <div class="row">
-            <div class="columns is-mobile has-text-centered">
-              <div class="column"><p></p></div>
-              <div class="column is-size-7-mobile"><p>MVDream<br>[Shi et al. 2023]</p></div>
-              <div class="column is-size-7-mobile"><p>GraphDreamer<br>[Gao et al. 2024]</p></div>
-              <div class="column is-size-7-mobile"><p>LayoutPrompter<br>[Lin et al. 2024]</p></div>
-              <div class="column is-size-7-mobile" style="font-size: large;"><p><b>Ours</b></p></div>
-            </div>
-          </div>
-
-          <div class="row">
-            <div class="columns is-mobile">
-              <div class="column is-one-fifth is-flex is-justify-content-center	is-align-items-center">
-                <p class="is-size-4-desktop is-size-6-mobile" style="font-family: Perpetua;">A wineglass left of a wine bottle</p>
-              </div>
-              <div class="column">
-                <video autoplay playsinline muted loop controls>
-                  <source src="./static/images/compare1.mov" type="video/mp4">
-                </video>
-              </div>
-            </div>
-          </div>
-
-          <div class="row">
-            <div class="columns is-mobile">
-              <div class="column is-one-fifth is-flex is-justify-content-center	is-align-items-center">
-                <p class="is-size-4-desktop is-size-6-mobile" style="font-family: Perpetua;">Three plates circularly surrounding a large bowl</p>
-              </div>
-              <div class="column">
-                <video autoplay playsinline muted loop controls>
-                  <source src="./static/images/compare2.mov" type="video/mp4">
-                </video>
-              </div>
-            </div>
-          </div>
-
-          <div class="row">
-            <div class="columns is-mobile">
-              <div class="column is-one-fifth is-flex is-justify-content-center	is-align-items-center">
-                <p class="is-size-4-desktop is-size-6-mobile" style="font-family: Perpetua;">A stack of three bowls</p>
-              </div>
-              <div class="column">
-                <video autoplay playsinline muted loop controls>
-                  <source src="./static/images/compare3.mov" type="video/mp4">
-                </video>
-              </div>
-            </div>
-          </div>
-
-          <div class="row">
-            <div class="columns is-mobile">
-              <div class="column is-one-fifth is-flex is-justify-content-center	is-align-items-center">
-                <p class="is-size-4-desktop is-size-6-mobile" style="font-family: Perpetua;">A pile of three towels</p>
-              </div>
-              <div class="column">
-                <video autoplay playsinline muted loop controls>
-                  <source src="./static/images/compare4.mov" type="video/mp4">
-                </video>
-              </div>
-            </div>
-          </div>
-
-          <div class="row">
-            <div class="columns is-mobile">
-              <div class="column is-one-fifth is-flex is-justify-content-center	is-align-items-center">
-                <p class="is-size-4-desktop is-size-6-mobile" style="font-family: Perpetua;">A cup in front of a coffee maker</p>
-              </div>
-              <div class="column">
-                <video autoplay playsinline muted loop controls>
-                  <source src="./static/images/compare5.mov" type="video/mp4">
-                </video>
-              </div>
-            </div>
-          </div>
-
-          <div class="row">
-            <div class="columns is-mobile">
-              <div class="column is-one-fifth is-flex is-justify-content-center	is-align-items-center">
-                <p class="is-size-4-desktop is-size-6-mobile" style="font-family: Perpetua;">A rectangle grid of four potted plants</p>
-              </div>
-              <div class="column">
-                <video autoplay playsinline muted loop controls>
-                  <source src="./static/images/compare6.mov" type="video/mp4">
-                </video>
-              </div>
-            </div>
-          </div>
-        </div>
-
-
-        <div class="content has-text-justified">
-          <h4 class="title is-4 mt-6">Diverse Generation Results</h4>
-          <p>
-            Our SceneMotifCoder framework generalizes the motifs exhibited by input examples to produce diverse arrangements with differing object categories, object counts, and spatial configurations.
-          </p>
-        </div>
-        <video autoplay playsinline muted loop controls>
-          <source src="./static/images/results.mov">
-        </video>
+        <img src="./static/images/results.webp" alt="Qualitative examples">
 
       </div>
     </div>
@@ -335,44 +267,34 @@
 
   <section class="section">
     <div class="container is-max-widescreen">
-      <!-- Applications. -->
+      <!-- Application. -->
       <div class="center-container">
 
-        <h3 class="title is-3">Applications</h3>
+        <h3 class="title is-3">Application</h3>
 
         <div class="content has-text-justified">
-          <h4 class="title is-4">Populating Scene</h4>
           <p>
-            We populate an indoor scene with dense, realistic object arrangements by instantiating a variety of learned motifs.
-            The dining table shown here is populated by instantiating arrangements from six motif types.
-            Note that the small object arrangements are essential for conveying specific scene states — e.g., a birthday party
+            Streaming grounding can help assistants on smart glasses.
+            We run EgoR-MTU3D on a recording from Aria glasses: by query time, the wearer has walked through a multi-room apartment for 24 minutes, and the space has been mapped into over 2,000 object tracks.
+            Asked for <i>"the kettle I used to boil water"</i> 76 seconds after the kettle left view, while the wearer is in another room, the model grounds the kettle in 3D, which can guide the wearer back to it.
           </p>
-          <img src="./static/images/application_scene.png">
-        </div>
-
-        <div class="content has-text-justified">
-          <h4 class="title is-4 mt-6">Meta-Program Editing</h4>
-          <p>
-            We edit a learned <i>stack</i> motif meta-program to introduce an additional object category at the top of the stack.
-            The edited meta-program preserves the generality of the original while adapting the motif with a user modification.
-            On the right is a generated arrangement of <i>"a stack of three plates and a cup"</i> using this edited meta-program.
-          </p>
-          <img class="pl-6 pr-6" src="./static/images/application_edit.png">
+          <img src="./static/images/aria.webp" alt="Demo on Aria glasses">
         </div>
 
       </div>
-      <!--/ Applications. -->
+      <!--/ Application. -->
     </div>
   </section>
 
   <section class="section" id="BibTeX">
     <div class="container is-max-widescreen content">
       <h2 class="title">BibTeX</h2>
-      <pre><code>@inproceedings{tam2024smc,
-    title = {{SceneMotifCoder: Example-driven Visual Program Learning for Generating 3D Object Arrangements}},
-    author = {Tam, Hou In Ivan and Pun, Hou In Derek and Wang, Austin T. and Chang, Angel X. and Savva, Manolis},
-    year = {2025},
-    booktitle = {Proceedings of the IEEE Conference on 3D Vision (3DV)},
+      <pre><code>@article{tam2026egorecall,
+    title = {{EgoRecall}: {3D} Visual Grounding from Streaming Egocentric Observations},
+    author = {Tam, Hou In Ivan and Savva, Manolis},
+    year = {2026},
+    eprint = {XXXX.XXXXX},
+    archivePrefix = {arXiv}
 }</code></pre>
     </div>
   </section>
@@ -381,9 +303,9 @@
     <div class="container is-max-widescreen content">
       <h2 class="title">Acknowledgements</h2>
       <p>
-        This work was funded in part by a CIFAR AI Chair, a Canada Research Chair, NSERC Discovery Grant, and enabled by support from WestGrid and the 
-        <a href="https://alliancecan.ca/">Digital Research Alliance of Canada</a>.
-        We thank Qirui Wu, Jiayi Liu, and Han-Hung Lee for helpful discussions and feedback.
+        This work was funded in part by a Canada Research Chair, NSERC Discovery Grants, and enabled by support from the
+        <a href="https://alliancecan.ca/">Digital Research Alliance of Canada</a>, and an NVIDIA Academic Grant Award.
+        We thank Austin T. Wang, Denys Iliash, and Weikun Peng for helpful feedback and discussions.
       </p>
     </div>
   </section>

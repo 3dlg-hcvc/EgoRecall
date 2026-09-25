@@ -1,37 +1,5 @@
 window.HELP_IMPROVE_VIDEOJS = false;
 
-var INTERP_BASE = ["./static/images/test/our", "./static/images/test/mv", "./static/images/test/gd"];
-var INTERP_TEXT = ["Ours", "MVDream", "GraphDreamer"];
-var NUM_INTERP_FRAMES = 120;
-
-var interp_images = [];
-function preloadInterpolationImages() {
-  for (var x = 0; x < 3; x++) {
-    interp_images[x] = [];
-    for (var i = 0; i < NUM_INTERP_FRAMES; i++) {
-      var path = INTERP_BASE[x] + '/rgb_' + String(i) + '.png';
-      interp_images[x][i] = new Image();
-      interp_images[x][i].src = path;
-    }
-  }
-}
-
-function setInterpolationImage(i) {
-  $('#interpolation-image-wrapper').empty();
-  for (var x = 0; x < 3; x++) {
-    var image = interp_images[x][i];
-    image.ondragstart = function() { return false; };
-    image.oncontextmenu = function() { return false; };
-    
-    var imageContainer = $('<div>').addClass('image-container');
-    $(imageContainer).append(image);
-    var textContainer = $('<div>').addClass('text-container');
-    $(textContainer).text(INTERP_TEXT[x]);
-    $(imageContainer).append(textContainer);
-    $('#interpolation-image-wrapper').append(imageContainer);
-  }
-}
-
 
 $(document).ready(function() {
     // Check for click events on the navbar burger icon
@@ -78,13 +46,6 @@ $(document).ready(function() {
         player.currentTime = player.duration / 100 * this.value;
       })
     }, false);*/
-    preloadInterpolationImages();
-
-    $('#interpolation-slider').on('input', function(event) {
-      setInterpolationImage(this.value);
-    });
-    setInterpolationImage(0);
-    $('#interpolation-slider').prop('max', NUM_INTERP_FRAMES - 1);
 
     bulmaSlider.attach();
 
