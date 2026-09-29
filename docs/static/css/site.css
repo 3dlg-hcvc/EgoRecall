@@ -375,6 +375,17 @@ h3 { margin: 0 0 8px; color: var(--ink); font-size: 21px; line-height: 1.3; font
    bar slides when the server gives no file size */
 .loading { display: grid; justify-items: center; gap: 10px; font-variant-numeric: tabular-nums; }
 .loading[hidden] { display: none; }
+.loading-text { max-width: 340px; text-align: center; }
+.reload-button {
+  padding: 5px 12px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: #fff;
+  color: var(--ink);
+  font: 600 12.5px/1.3 "Inter", sans-serif;
+  cursor: pointer;
+}
+.reload-button:hover { border-color: #cfd4dc; }
 .progress { position: relative; width: 180px; height: 6px; overflow: hidden; border-radius: 3px; background: var(--line); }
 .progress-fill {
   position: absolute;

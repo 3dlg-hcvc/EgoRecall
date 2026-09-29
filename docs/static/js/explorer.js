@@ -68,21 +68,21 @@ function element(tag, className, text) {
 
 async function fetchJson(url) {
   const response = await fetch(url);
-  if (!response.ok) throw new Error(`${url}: ${response.status}`);
+  if (!response.ok) throw new Error(`HTTP ${response.status}`);
   return response.json();
 }
 
 async function fetchBuffer(url) {
   const response = await fetch(url);
-  if (!response.ok) throw new Error(`${url}: ${response.status}`);
+  if (!response.ok) throw new Error(`HTTP ${response.status}`);
   return response.arrayBuffer();
 }
 
 // Fetch a whole file as a Blob, calling onProgress(received, total) after each chunk; total is the Content-Length, or 0
 // when the server sends none
-async function fetchWithProgress(url, onProgress, options = {}) {
-  const response = await fetch(url, options);
-  if (!response.ok) throw new Error(`${url}: ${response.status}`);
+async function fetchWithProgress(url, onProgress) {
+  const response = await fetch(url);
+  if (!response.ok) throw new Error(`HTTP ${response.status}`);
   const total = Number(response.headers.get("Content-Length")) || 0;
   const reader = response.body.getReader();
   const chunks = [];
@@ -111,6 +111,33 @@ function showProgress(status, label) {
     fill.style.width = `${percent}%`;
     bar.setAttribute("aria-valuenow", String(percent));
   };
+}
+
+// Run a download again when it fails, for example because a connection dropped midway (forwarded ports and tunnels do
+// this now and then): three attempts, one and then three seconds apart. onRetry is called before each new attempt, and
+// the last failure names the file.
+async function withRetries(file, download, onRetry) {
+  const delays = [1000, 3000];
+  for (let attempt = 0; ; attempt++) {
+    try {
+      return await download();
+    } catch (error) {
+      if (attempt === delays.length) throw new Error(`${file} did not download (${error.message})`);
+      console.warn(`${file} did not download (${error.message}); trying again`);
+      onRetry();
+      await new Promise((resolve) => setTimeout(resolve, delays[attempt]));
+    }
+  }
+}
+
+// Replace a loading element's label and bar with the reason it failed and a button that reloads the page
+function showFailure(status, message) {
+  const button = element("button", "reload-button", "Reload the page");
+  button.type = "button";
+  button.addEventListener("click", () => location.reload());
+  status.classList.remove("is-indeterminate");
+  status.replaceChildren(element("span", "loading-text", message), button);
+  status.hidden = false;
 }
 
 // ---------- Scene data ----------
@@ -206,19 +233,26 @@ class Explorer {
     if (this.loading) return;
     this.loading = true;
     const status = this.root.querySelector("#viewer-status");
+    const label = "Loading the scene…";
+    const retrying = () => {
+      status.querySelector(".loading-text").textContent = `${label} trying again`;
+    };
     try {
-      // The scene's description first: it names the camera video, which then downloads beside the scene files at a
-      // lower priority, with its own progress in the camera panel
-      this.meta = await fetchJson(this.base + "meta.json");
-      this.bindVideo();
+      // The scene's files first, with the whole connection to themselves; the camera video downloads after them, while
+      // the scene is built (bindVideo)
+      this.meta = await withRetries("meta.json", () => fetchJson(this.base + "meta.json"), retrying);
       const [objects, queries, points, trajectory] = await Promise.all([
-        fetchJson(this.base + "objects.json"),
-        fetchJson(this.base + "queries.json"),
+        withRetries("objects.json", () => fetchJson(this.base + "objects.json"), retrying),
+        withRetries("queries.json", () => fetchJson(this.base + "queries.json"), retrying),
         // The points are nearly all of the scene's bytes, so their download stands for the scene's progress
-        fetchWithProgress(this.base + "points.bin", showProgress(status, "Loading the scene…"))
-          .then((blob) => blob.arrayBuffer()),
-        fetchBuffer(this.base + "trajectory.bin"),
+        withRetries(
+          "points.bin",
+          async () => (await fetchWithProgress(this.base + "points.bin", showProgress(status, label))).arrayBuffer(),
+          retrying,
+        ),
+        withRetries("trajectory.bin", () => fetchBuffer(this.base + "trajectory.bin"), retrying),
       ]);
+      this.bindVideo();
       this.objects = objects;
       this.objectById = new Map(objects.map((object) => [object.id, object]));
       this.queries = queries;
@@ -240,7 +274,10 @@ class Explorer {
       autoplay.observe(this.root.querySelector("#viewer"));
     } catch (error) {
       console.error(error);
-      status.textContent = "The scene could not be loaded.";
+      const reason = /webgl/i.test(error.message)
+        ? "the browser could not start WebGL, which draws the 3D view"
+        : error.message.replace(/\.$/, "");
+      showFailure(status, `The scene could not be loaded: ${reason}.`);
     }
   }
 
@@ -637,8 +674,12 @@ class Explorer {
     // panel shows the download's progress until the first frame is decoded, and playback waits for it; if the video
     // cannot be loaded, the scene plays without it.
     const status = this.root.querySelector("#frame-status");
-    fetchWithProgress(this.base + this.meta.video.file, showProgress(status, "Loading the camera frames…"), {
-      priority: "low",
+    const label = "Loading the camera frames…";
+    const text = status.querySelector(".loading-text");
+    text.textContent = label;
+    const file = this.meta.video.file;
+    withRetries(file, () => fetchWithProgress(this.base + file, showProgress(status, label)), () => {
+      text.textContent = `${label} trying again`;
     })
       .then((blob) => {
         this.videoUrl = URL.createObjectURL(blob);
@@ -652,7 +693,7 @@ class Explorer {
       })
       .catch((error) => {
         console.error(error);
-        status.textContent = "The camera frames could not be loaded.";
+        showFailure(status, `The camera frames could not be loaded: ${error.message}. The scene plays without them.`);
         this.framesReady = true;
       });
   }
