@@ -677,6 +677,12 @@ th[data-tip] { text-decoration: underline dotted #b8bfca; text-underline-offset:
 .results-table table { font-size: 13.5px; }
 .results-table th, .results-table td { padding: 7px 8px; }
 .results-table thead th { vertical-align: bottom; }
+/* Metric names keep the paper's notation (F1 with a subscript, Top-1, egoD), so these headers are not capitalized */
+.results-table thead th, .mini-table thead th { font-size: 12.5px; letter-spacing: 0; text-transform: none; }
+/* The first header row labels the column groups, as in the paper: Overall, and F1_sel by operator family */
+.results-table .head-group th { text-align: center; vertical-align: middle; }
+.results-table .head-group th[rowspan] { text-align: right; vertical-align: bottom; }
+.results-table .head-group th:first-child { text-align: left; }
 .results-table thead .n { display: block; color: var(--light); font-size: 10.5px; font-weight: 500; letter-spacing: 0; text-transform: none; }
 .results-table .group td {
   padding-top: 14px;
@@ -744,6 +750,13 @@ html:not(.js) .timeline.is-compact { display: none; }
   overflow-x: auto;
   white-space: pre;
 }
+/* Syntax colors in the Get started code, after GitHub's dark theme: commands and calls, flags and numbers, strings,
+   keywords, and comments */
+.code .tok-cmd, .code .tok-fn { color: #d2a8ff; }
+.code .tok-flag, .code .tok-num { color: #79c0ff; }
+.code .tok-str { color: #a5d6ff; }
+.code .tok-kw { color: #ff7b72; }
+.code .tok-com { color: #8b949e; }
 
 .citation { position: relative; }
 .citation .code { margin: 0; padding-right: 96px; font-size: 13.5px; }
