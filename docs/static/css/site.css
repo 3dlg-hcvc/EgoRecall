@@ -14,11 +14,8 @@
   --blue: #1d5fb8;
   --blue-soft: #eaf1fb;
   --orange: #e8671a;
-  --orange-soft: #fdf1e8;
   --teal: #0f8a7a;
-  --teal-soft: #e7f5f2;
   --green: #22a55a;
-  --slate: #98a2b3;
 
   --radius: 16px;
   --shadow: 0 1px 3px rgba(16, 24, 40, 0.04), 0 8px 24px rgba(16, 24, 40, 0.05);
@@ -247,9 +244,9 @@ h3 { margin: 0 0 8px; color: var(--ink); font-size: 21px; line-height: 1.3; font
   letter-spacing: 0.1em;
   text-transform: uppercase;
 }
-.axis-history { --axis: var(--blue); --axis-soft: var(--blue-soft); }
-.axis-egocentric { --axis: var(--orange); --axis-soft: var(--orange-soft); }
-.axis-allocentric { --axis: var(--teal); --axis-soft: var(--teal-soft); }
+.axis-history { --axis: var(--blue); }
+.axis-egocentric { --axis: var(--orange); }
+.axis-allocentric { --axis: var(--teal); }
 
 .query {
   border: 1px solid var(--line);
@@ -747,7 +744,6 @@ html:not(.js) .timeline.is-compact { display: none; }
   overflow-x: auto;
   white-space: pre;
 }
-.code .comment { color: #8b93a5; }
 
 .citation { position: relative; }
 .citation .code { margin: 0; padding-right: 96px; font-size: 13.5px; }
