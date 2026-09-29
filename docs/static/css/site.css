@@ -101,7 +101,24 @@ code, pre { font-family: var(--mono); }
 
 /* ---------- Wordmark ---------- */
 
-.wordmark {
+/* The E of "EgoRecall" is drawn as the site icon, an E whose middle bar is an eye. The letter itself stays in the
+   text, transparent, so it keeps its spacing and is still read and copied as part of the name. */
+.wordmark-e { position: relative; color: transparent; }
+.wordmark-e::before {
+  /* Inter's E is 0.61em wide and runs from the cap height, 0.241em below the top of the letter's box, to the baseline */
+  content: "";
+  position: absolute;
+  left: 0;
+  top: 0.241em;
+  width: 0.61em;
+  height: 0.728em;
+  background: url("../images/wordmark-e.svg") no-repeat 0 0 / 100% 100%;
+}
+/* Forced system colors show the transparent E, which the icon would then double */
+@media (forced-colors: active) {
+  .wordmark-e::before { display: none; }
+}
+.wordmark-text {
   background: linear-gradient(90deg, var(--blue) 0%, #3b6fc0 55%, var(--orange) 100%);
   -webkit-background-clip: text;
   background-clip: text;
@@ -119,7 +136,7 @@ code, pre { font-family: var(--mono); }
 .hero h1 {
   display: inline-block;
   margin: 0;
-  /* The gradient is clipped to the text box, so the box must reach the descender of the g */
+  /* The g's descender reaches below the one-em line, so leave room for it */
   padding-bottom: 0.12em;
   font-size: 76px;
   line-height: 1;

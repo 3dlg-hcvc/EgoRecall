@@ -1,0 +1,10 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 610 728">
+  <!-- The title's E: Inter ExtraBold's E in thousandths of an em, from the cap height down to the baseline, with the
+       favicon's eye in place of its middle bar. The stylesheet draws it over the title's transparent E. -->
+  <rect x="57" y="0" width="172" height="728" fill="#1d5fb8"/>
+  <rect x="57" y="0" width="505" height="141" fill="#1d5fb8"/>
+  <rect x="57" y="587" width="504" height="141" fill="#1d5fb8"/>
+  <!-- The eye runs from the stem to x 580, centred midway between the bars; its pupil sits at the centre -->
+  <path d="M 229 364 Q 404.5 74 580 364 Q 404.5 654 229 364 Z" fill="#9cc2ef"/>
+  <circle cx="404.5" cy="364" r="76" fill="#1d5fb8"/>
+</svg>
