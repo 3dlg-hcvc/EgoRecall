@@ -1,0 +1,64 @@
+{
+ "scene_id": "61adeff7d5",
+ "split": "test",
+ "fps": 6,
+ "num_frames": 1477,
+ "points": {
+  "count": 410831,
+  "observed": 394175,
+  "min": [
+   0.00068,
+   0.03716,
+   0.00369
+  ],
+  "max": [
+   11.24377,
+   5.86005,
+   2.0
+  ],
+  "voxel": 0.02,
+  "ceiling": 2.0,
+  "min_views": 2
+ },
+ "camera": {
+  "width": 1920,
+  "height": 1440,
+  "fx": 1429.083,
+  "fy": 1429.083,
+  "cx": 954.774,
+  "cy": 724.464
+ },
+ "video": {
+  "file": "frames.mp4",
+  "poster": "poster.jpg",
+  "width": 480,
+  "height": 360
+ },
+ "methods": [
+  {
+   "key": "mtu3d_full",
+   "name": "EgoR-MTU3D",
+   "family": "Object-centric memory"
+  },
+  {
+   "key": "vlm",
+   "name": "Qwen 3.8-27B",
+   "family": "VLM pointing"
+  },
+  {
+   "key": "qwen3d",
+   "name": "Qwen3D-3B",
+   "family": "Memory-free 3D grounding"
+  },
+  {
+   "key": "daaam",
+   "name": "DAAAM",
+   "family": "Scene-graph memory"
+  },
+  {
+   "key": "directme",
+   "name": "DirectMe-GT-PD",
+   "family": "Scene-graph memory"
+  }
+ ]
+}

@@ -1,0 +1,597 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>EgoRecall: 3D Visual Grounding from Streaming Egocentric Observations</title>
+  <meta name="description" content="EgoRecall is a benchmark of 2.25M timestamped referring expressions over 183 ScanNet++ scenes for 3D visual grounding from streaming egocentric observations.">
+  <link rel="canonical" href="https://3dlg-hcvc.github.io/EgoRecall/">
+  <link rel="icon" type="image/svg+xml" href="static/images/favicon.svg">
+
+  <meta property="og:type" content="website">
+  <meta property="og:site_name" content="EgoRecall">
+  <meta property="og:title" content="EgoRecall: 3D Visual Grounding from Streaming Egocentric Observations">
+  <meta property="og:description" content="A benchmark of 2.25M timestamped referring expressions over 183 ScanNet++ scenes, grounded from the observations available at query time.">
+  <meta property="og:url" content="https://3dlg-hcvc.github.io/EgoRecall/">
+  <meta property="og:image" content="https://3dlg-hcvc.github.io/EgoRecall/static/images/social.jpg">
+  <meta property="og:image:width" content="1200">
+  <meta property="og:image:height" content="630">
+  <meta name="twitter:card" content="summary_large_image">
+  <meta name="twitter:title" content="EgoRecall: 3D Visual Grounding from Streaming Egocentric Observations">
+  <meta name="twitter:image" content="https://3dlg-hcvc.github.io/EgoRecall/static/images/social.jpg">
+
+  <!-- Google tag (gtag.js) -->
+  <script async src="https://www.googletagmanager.com/gtag/js?id=G-RB31R5FBGE"></script>
+  <script>
+    window.dataLayer = window.dataLayer || [];
+    function gtag(){dataLayer.push(arguments);}
+    gtag('js', new Date());
+
+    gtag('config', 'G-RB31R5FBGE');
+  </script>
+
+  <script>document.documentElement.classList.add("js");</script>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="static/css/site.css">
+  <script defer src="https://cdn.jsdelivr.net/npm/chart.js@4.5.1/dist/chart.umd.min.js"></script>
+  <script defer src="static/js/site.js"></script>
+  <script type="importmap">
+    {
+      "imports": {
+        "three": "https://cdn.jsdelivr.net/npm/three@0.186.1/build/three.module.js",
+        "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.186.1/examples/jsm/"
+      }
+    }
+  </script>
+  <script type="module" src="static/js/explorer.js"></script>
+</head>
+<body>
+
+<!-- Sticky bar, shown once the title area scrolls away -->
+<header class="topbar" id="topbar">
+  <div class="topbar-inner">
+    <a class="topbar-mark wordmark" href="#">EgoRecall</a>
+    <nav class="topbar-nav" aria-label="Sections">
+      <a href="#task">Task</a>
+      <a href="#dataset">Dataset</a>
+      <a href="#explore">Explore</a>
+      <a href="#results">Results</a>
+      <a href="#demo">Demo</a>
+      <a href="#start">Get started</a>
+      <a href="#citation">Citation</a>
+    </nav>
+    <div class="buttons">
+      <a class="button is-small is-primary" href="" aria-label="Paper">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8z"/><path d="M14 3v5h5M9 13h6M9 17h6"/></svg>
+        <span>Paper</span>
+      </a>
+      <a class="button is-small" href="https://github.com/3dlg-hcvc/EgoRecall" aria-label="Code">
+        <svg viewBox="0 0 16 16" fill="currentColor"><path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.013 8.013 0 0 0 16 8c0-4.42-3.58-8-8-8z"/></svg>
+        <span>Code</span>
+      </a>
+      <a class="button is-small" href="https://huggingface.co/datasets/3dlg-hcvc/EgoRecall" aria-label="Data">
+        <img src="https://huggingface.co/front/assets/huggingface_logo-noborder.svg" alt="">
+        <span>Data</span>
+      </a>
+    </div>
+  </div>
+</header>
+
+<!-- ==================== Title ==================== -->
+<div class="hero">
+  <div class="container">
+    <h1 class="wordmark">EgoRecall</h1>
+    <p class="subtitle">3D Visual Grounding from Streaming Egocentric Observations</p>
+    <p class="authors">
+      <a href="https://iv-t.github.io/">Hou In Ivan Tam</a>,&nbsp;
+      <a href="https://msavva.github.io/">Manolis Savva</a>
+    </p>
+    <p class="affiliation"><a href="https://www.sfu.ca/">Simon Fraser University</a></p>
+    <div class="buttons" id="hero-buttons">
+      <a class="button is-primary" href="">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8z"/><path d="M14 3v5h5M9 13h6M9 17h6"/></svg>
+        Paper
+      </a>
+      <a class="button" href="https://github.com/3dlg-hcvc/EgoRecall">
+        <svg viewBox="0 0 16 16" fill="currentColor"><path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.013 8.013 0 0 0 16 8c0-4.42-3.58-8-8-8z"/></svg>
+        Code
+      </a>
+      <a class="button" href="https://huggingface.co/datasets/3dlg-hcvc/EgoRecall">
+        <img src="https://huggingface.co/front/assets/huggingface_logo-noborder.svg" alt="">
+        Data
+      </a>
+    </div>
+  </div>
+
+  <figure class="container hero-figure">
+    <div class="frame">
+      <a class="zoom" href="static/images/teaser.webp"><img src="static/images/teaser.webp" width="2560" height="945"
+           alt="Left: egocentric frames and a top-down map with the camera trajectory. Right: a query at time 150, “Locate the chair next to the first suitcase I saw”, grounded by recalling when each suitcase and chair was first seen."></a>
+    </div>
+    <figcaption>
+      An agent perceives a scene through a stream of egocentric views.
+      At query time τ it receives a referring expression that may depend on <em>when</em> objects were observed and <em>from where</em>, and it must find the referred objects in 3D, even when they are no longer visible.
+    </figcaption>
+  </figure>
+
+  <div class="container">
+    <div class="abstract">
+      <p class="eyebrow">Abstract</p>
+      <p>
+        We introduce streaming egocentric 3D visual grounding, where an agent resolves referring expressions using only the partial observation history available at query time.
+        Unlike conventional 3DVG, which assumes a complete scene representation, queries may depend on when and how objects were encountered as well as their spatial relationships.
+      </p>
+      <p>
+        We present EgoRecall, the first benchmark for this task, comprising 2.25M timestamped queries generated by a compositional DSL over observation history, egocentric relationships, and allocentric structure.
+        Queries are defined with respect to the observations available at their timestamps and may refer to either currently visible or previously observed objects, requiring persistent scene memory.
+      </p>
+      <p>
+        We evaluate VLM-, 3D-, and memory-based methods under protocols that separate perception from grounding.
+        The task is challenging with our strongest system achieving only 14.1 F1.
+        Our experiments show that modeling observation history and camera-relative relationships improves performance, but targets no longer visible remain particularly challenging.
+      </p>
+    </div>
+  </div>
+</div>
+
+<main>
+
+  <!-- ==================== The task ==================== -->
+  <section class="block" id="task">
+    <div class="container">
+      <div class="block-header reveal">
+        <h2>Grounding from what you have <span class="highlight">already seen</span></h2>
+        <p class="lede">
+          Consider a user wearing smart glasses who walks through an unfamiliar office and then asks for “the cabinet to the right of the first sink I encountered”.
+          The assistant must find that cabinet in 3D from the video so far, although both objects may have left the view long ago.
+          We tackle this streaming egocentric setting, where such references draw on three axes.
+        </p>
+      </div>
+
+      <div class="axis-grid">
+        <article class="card axis-card axis-history reveal">
+          <div class="art"><img src="static/images/axis_history.webp" alt="A trajectory through a room with timers where objects were seen." loading="lazy"></div>
+          <h3>Observation history</h3>
+          <p class="definition">When and how objects were encountered: their order and recency.</p>
+          <p class="example-label">Example query in the dataset</p>
+          <div class="query" data-open-query="10551" role="button" tabindex="0" title="Test scene 61adeff7d5, query 10551. Open it in the scene explorer.">
+            <p class="text">the earliest heater</p>
+            <code class="program">first_seen(<wbr>heater)</code>
+            <p class="meta">Asked at 3:02<br>Target out of view for 109&nbsp;s</p>
+          </div>
+        </article>
+
+        <article class="card axis-card axis-egocentric reveal">
+          <div class="art"><img src="static/images/axis_egocentric.webp" alt="A person looking at two boxes: one is left of the other from their viewpoint." loading="lazy"></div>
+          <h3>Egocentric relationships</h3>
+          <p class="definition">Relations to the observer: what is in view, how far, and which side.</p>
+          <p class="example-label">Example query in the dataset</p>
+          <div class="query" data-open-query="9128" role="button" tabindex="0" title="Test scene 61adeff7d5, query 9128. Open it in the scene explorer.">
+            <p class="text">the cabinet closest to me</p>
+            <code class="program">nearest_to_cam(<wbr>cabinet)</code>
+            <p class="meta">Asked at 2:32<br>Target out of view for 52&nbsp;s</p>
+          </div>
+        </article>
+
+        <article class="card axis-card axis-allocentric reveal">
+          <div class="art"><img src="static/images/axis_allocentric.webp" alt="Two monitors next to each other on a desk." loading="lazy"></div>
+          <h3>Allocentric structure</h3>
+          <p class="definition">Relations among objects that do not depend on the viewpoint.</p>
+          <p class="example-label">Example query in the dataset</p>
+          <div class="query" data-open-query="10456" role="button" tabindex="0" title="Test scene 61adeff7d5, query 10456. Open it in the scene explorer.">
+            <p class="text">the paper roll nearest to the first shoes that appeared</p>
+            <code class="program">nearest(<wbr>first_seen(<wbr>shoes), paper roll)</code>
+            <p class="meta">Asked at 3:00<br>Target out of view for 46&nbsp;s</p>
+          </div>
+        </article>
+      </div>
+      <p class="note reveal">The example queries are from test scene 61adeff7d5 (queries 10551, 9128, and 10456); click one to open it in the scene explorer below.</p>
+    </div>
+  </section>
+
+  <!-- ==================== Dataset ==================== -->
+  <section class="block" id="dataset">
+    <div class="container">
+      <div class="block-header reveal">
+        <h2>The EgoRecall dataset</h2>
+        <p class="lede">
+          Queries are generated by executable programs over what the camera has seen, so every answer is exact at the moment it is asked.
+          Most queries refer to objects that are no longer in view.
+        </p>
+      </div>
+
+      <div class="stats reveal">
+        <div class="stat"><span class="value">2.25M</span><span class="label">queries</span></div>
+        <div class="stat"><span class="value">183</span><span class="label">ScanNet++ scenes</span></div>
+        <div class="stat"><span class="value">12.1&nbsp;h</span><span class="label">of video</span></div>
+        <div class="stat"><span class="value">21,331</span><span class="label">objects</span></div>
+        <div class="stat"><span class="value">1,366</span><span class="label">object categories</span></div>
+        <div class="stat"><span class="value">22</span><span class="label">program operators</span></div>
+      </div>
+
+      <div class="grid-3 steps">
+        <div class="card step reveal">
+          <h3>Record visibility</h3>
+          <p>Each ScanNet++ capture is replayed at 6 FPS. At every camera pose, the annotated mesh is rendered and checked against the sensor depth to record which objects are visible.</p>
+        </div>
+        <div class="card step reveal">
+          <h3>Run programs</h3>
+          <p>A query is a program over 22 operators, nested up to two levels. Running it at a frame uses only the objects seen by then, which gives its exact targets.</p>
+        </div>
+        <div class="card step reveal">
+          <h3>Emit and balance</h3>
+          <p>Along each video, programs run every 2&nbsp;s and are turned into text with templates. The 9.9M generated queries are then balanced across scenes, operator families, and target visibility into the final set of 2.25M queries.</p>
+        </div>
+      </div>
+
+      <div class="example-flow reveal" data-open-query="5743" role="button" tabindex="0" title="Open this query in the scene explorer.">
+        <code>left_of(first_seen(box), floor mat)</code>
+        <span class="arrow" aria-hidden="true">→</span>
+        <p class="expression">
+          “the floor mat to the left of the earliest boxes”
+          <span class="meta">Asked at 1:30 in test scene 61adeff7d5 · target out of view for 15&nbsp;s</span>
+        </p>
+      </div>
+
+      <div class="charts">
+        <div class="card reveal">
+          <p class="card-label">Are the targets in view when the query is asked?</p>
+          <div class="visibility-bar" role="img"
+               aria-label="All targets in view 20%, some in view 15%, none in view: last seen within 2 seconds 15%, 2 to 10 seconds 20%, 10 to 60 seconds 20%, over 60 seconds 10%.">
+            <div class="segment" style="width: 20%; background: #22a55a;"><strong>20%</strong><span>all in view</span></div>
+            <div class="segment" style="width: 15%; background: #7cc79a;"><strong>15%</strong><span>some in view</span></div>
+            <div class="segment" style="width: 15%; background: #9dbde8;"><strong>15%</strong><span>≤ 2&nbsp;s</span></div>
+            <div class="segment" style="width: 20%; background: #5f93d6;"><strong>20%</strong><span>2–10&nbsp;s</span></div>
+            <div class="segment" style="width: 20%; background: #2f6bbd;"><strong>20%</strong><span>10–60&nbsp;s</span></div>
+            <div class="segment" style="width: 10%; background: #173f7a;"><strong>10%</strong><span>&gt; 60&nbsp;s</span></div>
+          </div>
+          <div class="visibility-legend"><span>In view</span><span>None in view, by the longest time a target has been out of view →</span></div>
+          <p class="note">
+            80% of queries have a target outside the view.
+            When no target is in view, 46% of queries include one last seen more than 10&nbsp;s earlier, and 15% one last seen more than a minute earlier.
+            The dataset is balanced to these six groups by design.
+          </p>
+        </div>
+
+        <div class="grid-2" style="margin-top: 20px;">
+          <div class="card axes-card reveal">
+            <p class="card-label">Which reference axes a query uses</p>
+            <div class="chart-box"><canvas id="chart-axes" aria-label="Share of queries by the combination of reference axes they use."></canvas></div>
+            <p class="note">
+              48% of queries combine two axes, and 82% compose two or more operators.
+              Queries have 1.6 targets on average, and 42% refer to more than one object.
+              Queries with no axis name the only object of a category, alone or in a set.
+            </p>
+          </div>
+          <div class="card cloud-card reveal">
+            <p class="card-label">The 60 most frequent target categories, of 1,366</p>
+            <div class="cloud" id="category-cloud"></div>
+          </div>
+        </div>
+
+        <div class="card reveal" style="margin-top: 20px;">
+          <p class="card-label">Splits and evaluation stages</p>
+          <div class="table-wrap">
+            <table>
+              <thead>
+                <tr><th>Split</th><th>Scenes</th><th>Video</th><th>Objects</th><th>Queries</th><th>Stages</th></tr>
+              </thead>
+              <tbody>
+                <tr><td>Train</td><td>100</td><td>6.4&nbsp;h</td><td>11,582</td><td>1,202,906</td><td>–</td></tr>
+                <tr><td>Validation</td><td>13</td><td>0.8&nbsp;h</td><td>1,616</td><td>165,340</td><td>83</td></tr>
+                <tr><td>Test</td><td>70</td><td>4.8&nbsp;h</td><td>8,133</td><td>879,994</td><td>440</td></tr>
+              </tbody>
+            </table>
+          </div>
+          <p class="note">
+            Scenes do not overlap across splits.
+            Validation and test queries are divided into stages of 2,000, drawn so that stages 1 to <em>k</em> always form a proportional random sample; the paper evaluates test stages 1–5 (10,000 queries).
+            See the <a href="https://huggingface.co/datasets/3dlg-hcvc/EgoRecall">dataset card</a> for more details.
+          </p>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ==================== Explore a scene ==================== -->
+  <section class="block" id="explore">
+    <div class="container">
+      <div class="block-header reveal">
+        <h2>Explore a scene</h2>
+        <p class="lede">Replay a test scene and pick a query to see what it refers to and how each method answered.</p>
+      </div>
+
+      <div class="explorer" id="explorer" data-scene="61adeff7d5" tabindex="0">
+        <div class="explorer-stage">
+          <div class="viewer" id="viewer">
+            <div class="viewer-hud" id="viewer-hud">0:00</div>
+            <div class="viewer-tools" id="viewer-tools">
+              <button type="button" data-tool="follow">Follow camera</button>
+              <button type="button" data-tool="unobserved">Show unobserved</button>
+              <button type="button" data-tool="reset">Reset view</button>
+            </div>
+            <ul class="viewer-legend">
+              <li><span class="swatch swatch-camera"></span>Camera now</li>
+              <li><span class="swatch swatch-path"></span>Path so far</li>
+              <li><span class="swatch swatch-inview"></span>In view</li>
+              <li><span class="swatch swatch-remembered"></span>Remembered</li>
+              <li><span class="swatch swatch-target"></span>Target</li>
+              <li><span class="swatch swatch-anchor"></span>Anchor</li>
+              <li><span class="swatch swatch-wrong"></span>Wrong pick</li>
+            </ul>
+            <p class="viewer-status" id="viewer-status">Loading the scene…</p>
+            <div class="viewer-tooltip" id="viewer-tooltip" hidden></div>
+          </div>
+          <aside class="explorer-side">
+            <div class="frame-panel">
+              <video id="explorer-video" muted playsinline preload="auto"></video>
+              <span class="frame-label">Camera view · <span id="frame-time">0:00</span></span>
+            </div>
+            <div class="query-panel" id="query-panel">
+              <p class="panel-empty">Pick a query below or a mark on the timeline.</p>
+            </div>
+          </aside>
+        </div>
+
+        <div class="timeline">
+          <button type="button" class="play-button" id="explorer-play" aria-label="Play">▶</button>
+          <div class="track">
+            <input type="range" id="explorer-scrubber" min="0" max="1476" value="0" aria-label="Time">
+            <div class="markers" id="explorer-markers"></div>
+          </div>
+          <span class="time" id="explorer-time">0:00 / 4:06</span>
+          <div class="speeds" id="explorer-speeds" aria-label="Playback speed"></div>
+        </div>
+
+        <div class="query-browser">
+          <p class="panel-label">Featured queries</p>
+          <p class="method-key" id="method-key"></p>
+          <div class="query-list" id="query-list"></div>
+        </div>
+      </div>
+      <p class="note">Test scene 61adeff7d5 from <a href="https://scannetpp.mlsg.cit.tum.de/scannetpp/">ScanNet++</a>. Drag to rotate the view and scroll to zoom.</p>
+    </div>
+  </section>
+
+  <!-- ==================== Results ==================== -->
+  <section class="block" id="results">
+    <div class="container">
+      <div class="block-header reveal">
+        <h2>Results</h2>
+        <p class="lede">
+          We adapt five methods from four families and evaluate them on 10,000 test queries.
+          Each query is answered only from the frames up to its query time.
+        </p>
+      </div>
+
+      <div class="families reveal">
+        <div class="family">
+          <p class="name">VLM pointing</p>
+          <p class="methods">Qwen 3.8-27B</p>
+          <p>Chooses a frame among up to 64 RGB frames and points at each target.</p>
+        </div>
+        <div class="family">
+          <p class="name">Memory-free 3D grounding</p>
+          <p class="methods">Qwen3D-3B</p>
+          <p>Rebuilds a point cloud from up to 128 RGB-D frames for every query.</p>
+        </div>
+        <div class="family">
+          <p class="name">Scene-graph memory</p>
+          <p class="methods">DAAAM, DirectMe</p>
+          <p>Build a scene graph as frames arrive; a VLM selects its nodes.</p>
+        </div>
+        <div class="family">
+          <p class="name">Object-centric memory</p>
+          <p class="methods">MTU3D, EgoR-MTU3D</p>
+          <p>Keeps a memory bank of objects; EgoR-MTU3D adds history, recency, and viewpoint encoders.</p>
+        </div>
+      </div>
+
+      <div class="grid-2 findings">
+        <article class="card finding reveal">
+          <span class="tag">Finding 1</span>
+          <h3>The task is far from solved</h3>
+          <p>The best system, EgoR-MTU3D, reaches only 14.1 F1 on the full task.</p>
+          <div class="chart-box"><canvas id="chart-full-f1" aria-label="Full F1 by method."></canvas></div>
+        </article>
+        <article class="card finding reveal">
+          <span class="tag">Finding 2</span>
+          <h3>Remembered targets are harder</h3>
+          <p>F1 drops when every target has left the view before the query is asked.</p>
+          <div class="chart-box"><canvas id="chart-memory" aria-label="Full F1 on queries with all targets visible and with all targets remembered."></canvas></div>
+        </article>
+        <article class="card finding reveal">
+          <span class="tag">Finding 3</span>
+          <h3>Perception is a bottleneck</h3>
+          <p>
+            DirectMe builds its scene graph from its own estimates of camera pose and depth.
+            Replacing them with ground-truth poses and sensor depth raises both its coverage, the share of queries with a target among its candidates, and its F1.
+          </p>
+          <div class="table-wrap">
+            <table class="mini-table">
+              <thead><tr><th>DirectMe with</th><th data-tip="Share of queries where the method's candidates (memory entries, graph nodes, proposals, or input frames) include at least one target.">Coverage</th><th data-tip="F1 on all queries against all targets: the whole system, including perception and memory.">Full F1</th></tr></thead>
+              <tbody>
+                <tr><td>Estimated pose and depth</td><td>31.4%</td><td>0.5</td></tr>
+                <tr><td>Ground-truth pose</td><td>62.6%</td><td>6.7</td></tr>
+                <tr><td>Ground-truth pose and sensor depth</td><td>73.0%</td><td>8.7</td></tr>
+              </tbody>
+            </table>
+          </div>
+        </article>
+        <article class="card finding reveal">
+          <span class="tag">Finding 4</span>
+          <h3>Knowing when and from where helps</h3>
+          <p>
+            EgoR-MTU3D adds three encoders to MTU3D's object memory: history (when an object was first seen and how often), recency (whether it is in view and when it was last seen), and viewpoint (its direction and distance from the camera).
+            Each raises selection F1, and all three together raise it most.
+          </p>
+          <div class="chart-box"><canvas id="chart-encoders" aria-label="Selection F1 of fine-tuned MTU3D with each encoder."></canvas></div>
+        </article>
+      </div>
+
+      <div class="card results-table reveal">
+        <div class="table-wrap">
+          <table>
+            <thead>
+              <tr>
+                <th>Method</th>
+                <th data-tip="Camera poses and depth the method uses: ground truth (GT), the depth sensor, or its own estimates (est.).">Pose / depth</th>
+                <th class="split" data-tip="Share of queries where the method's candidates (memory entries, graph nodes, proposals, or input frames) include at least one target.">Coverage</th>
+                <th data-tip="F1 on the covered queries, counting only the targets among the method's candidates: how well it selects.">Selection F1</th>
+                <th data-tip="F1 on all queries against all targets: the whole system, including perception and memory.">Full F1</th>
+                <th data-tip="Share of queries whose top-ranked prediction is a target.">Top-1</th>
+                <th class="split" data-tip="Temporal: first, n-th, or last to appear, or most recently in sight.">temp<span class="n">5,203</span></th>
+                <th data-tip="Visibility: currently in view.">vis<span class="n">2,031</span></th>
+                <th data-tip="Identity: the only observed object of a category.">id<span class="n">1,544</span></th>
+                <th data-tip="Egocentric distance: nearest to or farthest from the camera.">egoD<span class="n">2,853</span></th>
+                <th data-tip="Egocentric depth: closer than, farther than, between, or behind, relative to the camera.">egoZ<span class="n">1,889</span></th>
+                <th data-tip="Lateral: left or right of, from the current view if both objects are visible, otherwise from a view where both were seen.">lat<span class="n">1,364</span></th>
+                <th data-tip="Proximity: next to another object.">prox<span class="n">752</span></th>
+                <th data-tip="Relational superlative: nearest to or farthest from another object.">sup<span class="n">1,868</span></th>
+                <th data-tip="Set operators: union, intersection, or difference.">set<span class="n">2,347</span></th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr class="group"><td colspan="15">VLM pointing</td></tr>
+              <tr><td>Qwen 3.8-27B†</td><td>– / –</td><td class="split">99.1</td><td>12.2</td><td>12.1</td><td>13.2</td><td class="split">11.8</td><td>16.4</td><td>17.4</td><td>11.0</td><td>11.1</td><td>7.9</td><td>13.6</td><td>9.2</td><td>18.8</td></tr>
+              <tr class="group"><td colspan="15">Memory-free 3D grounding</td></tr>
+              <tr><td>Qwen3D-3B</td><td>GT / sensor</td><td class="split">95.9</td><td>10.0</td><td>9.6</td><td>12.0</td><td class="split">9.0</td><td>11.1</td><td>12.0</td><td>10.2</td><td>11.5</td><td>9.2</td><td>13.0</td><td>8.1</td><td>10.3</td></tr>
+              <tr class="group"><td colspan="15">Scene-graph memory</td></tr>
+              <tr><td>DAAAM</td><td>GT / sensor</td><td class="split">77.7</td><td>10.4</td><td>7.9</td><td>11.6</td><td class="split">9.6</td><td>11.4</td><td>13.0</td><td>10.8</td><td>11.9</td><td>6.9</td><td>11.9</td><td>9.0</td><td>11.3</td></tr>
+              <tr><td>DirectMe</td><td>est. / est.</td><td class="split">31.4</td><td>1.7</td><td>0.5</td><td>0.7</td><td class="split">1.7</td><td>2.3</td><td>1.3</td><td>1.3</td><td>1.4</td><td>1.6</td><td>2.7</td><td>2.2</td><td>1.5</td></tr>
+              <tr><td>DirectMe-GT-P</td><td>GT / est.</td><td class="split">62.6</td><td>11.5</td><td>6.7</td><td>8.4</td><td class="split">10.0</td><td>14.6</td><td>14.4</td><td>11.3</td><td>11.4</td><td>8.6</td><td>9.7</td><td>9.4</td><td>13.0</td></tr>
+              <tr><td>DirectMe-GT-PD</td><td>GT / sensor</td><td class="split">73.0</td><td>12.7</td><td>8.7</td><td>10.9</td><td class="split">11.1</td><td>15.2</td><td>15.3</td><td>13.5</td><td>11.7</td><td>10.2</td><td>14.0</td><td>8.0</td><td>14.9</td></tr>
+              <tr class="group"><td colspan="15">Object-centric memory</td></tr>
+              <tr><td>MTU3D zero-shot</td><td>GT / sensor</td><td class="split">68.3</td><td>2.8</td><td>1.8</td><td>10.2</td><td class="split">2.1</td><td>2.9</td><td>4.6</td><td>2.1</td><td>2.1</td><td>1.6</td><td>2.2</td><td>2.1</td><td>2.2</td></tr>
+              <tr><td>MTU3D fine-tuned</td><td>GT / sensor</td><td class="split">68.3</td><td>15.9</td><td>10.1</td><td>17.9</td><td class="split">14.4</td><td>19.2</td><td>22.6</td><td>15.7</td><td>16.9</td><td>12.2</td><td>15.6</td><td>10.6</td><td>20.6</td></tr>
+              <tr class="indent"><td>+ history encoder</td><td>GT / sensor</td><td class="split">68.3</td><td>17.8</td><td>11.3</td><td>18.1</td><td class="split">16.3</td><td>21.4</td><td>24.5</td><td>17.7</td><td>19.8</td><td>13.0</td><td>15.8</td><td>11.8</td><td>22.4</td></tr>
+              <tr class="indent"><td>+ recency encoder</td><td>GT / sensor</td><td class="split">68.3</td><td>18.0</td><td>11.5</td><td>18.9</td><td class="split">16.2</td><td>24.2</td><td>23.3</td><td>16.4</td><td>20.5</td><td>12.9</td><td>16.8</td><td>11.5</td><td>21.8</td></tr>
+              <tr class="indent"><td>+ viewpoint encoder</td><td>GT / sensor</td><td class="split">68.3</td><td>19.7</td><td>12.6</td><td>20.9</td><td class="split">17.3</td><td>24.4</td><td>25.3</td><td>20.6</td><td>24.8</td><td>12.3</td><td>20.2</td><td>11.7</td><td>23.4</td></tr>
+              <tr class="best"><td>EgoR-MTU3D</td><td>GT / sensor</td><td class="split">68.3</td><td><b>22.2</b></td><td><b>14.1</b></td><td><b>22.5</b></td><td class="split"><b>19.9</b></td><td><b>27.9</b></td><td><b>27.0</b></td><td><b>23.0</b></td><td><b>27.4</b></td><td><b>15.1</b></td><td><b>20.7</b></td><td><b>13.8</b></td><td><b>26.5</b></td></tr>
+            </tbody>
+          </table>
+        </div>
+        <p class="note" style="padding: 0 10px 8px;">
+          Grounding performance on the 10,000 test queries of stages 1–5; hover over a column header for its definition.
+          The operator-family columns give selection F1 on the queries whose program uses that family, and the small number is how many queries do.
+          † The VLM's points are resolved with ground-truth instance maps.
+        </p>
+      </div>
+
+      <figure class="card figure-card reveal" style="margin-top: 20px;">
+        <a class="zoom" href="static/images/results.webp"><img src="static/images/results.webp" width="2560" height="1328" loading="lazy"
+             alt="Qualitative results: top-down maps with ground-truth and predicted boxes for three queries whose targets are out of view."></a>
+        <figcaption>
+          All three targets are out of view at query time τ.
+          Green boxes are ground truth or correct predictions, red boxes are wrong, and blue marks trajectories and anchors.
+          Top: memory-based methods recover the cabinet after a 414-second history, while methods without persistent memory fail.
+          Bottom left: the viewpoint encoder lets MTU3D ground the remembered table, where Qwen and MTU3D without it pick other, visible tables.
+          Bottom right: DirectMe's estimated trajectory drifts and it picks the wrong pillow; with true poses it is correct.
+        </figcaption>
+      </figure>
+    </div>
+  </section>
+
+  <!-- ==================== Real-world demo ==================== -->
+  <section class="block" id="demo">
+    <div class="container">
+      <div class="block-header reveal">
+        <h2>Demo on Aria glasses</h2>
+        <p class="lede">We run EgoR-MTU3D on a real recording from Project Aria glasses.</p>
+      </div>
+      <figure class="card figure-card reveal">
+        <a class="zoom" href="static/images/aria.webp"><img src="static/images/aria.webp" width="2560" height="1483" loading="lazy"
+             alt="Frames from Aria glasses, a 3D map with the wearer's trajectory, and the grounded kettle."></a>
+        <figcaption>
+          The recording follows the wearer for 24 minutes through a multi-room apartment, which is mapped into over 2,000 object tracks.
+          Asked for “the kettle I used to boil water” 76&nbsp;s after it left the view, while the wearer is in another room, EgoR-MTU3D grounds the kettle in 3D, a location that can guide the user back to it.
+        </figcaption>
+      </figure>
+    </div>
+  </section>
+
+  <!-- ==================== Get started ==================== -->
+  <section class="block" id="start">
+    <div class="container">
+      <div class="block-header reveal">
+        <h2>Get started</h2>
+        <p class="lede">
+          The annotations are on Hugging Face; the frames, depth, and camera poses come from ScanNet++, which you download separately and prepare with our code.
+          See the <a href="https://github.com/3dlg-hcvc/EgoRecall">README</a> for setup and the <a href="https://huggingface.co/datasets/3dlg-hcvc/EgoRecall">dataset card</a> for the data format.
+        </p>
+      </div>
+      <div class="steps start-list">
+        <div class="card step start-row reveal">
+          <div>
+            <h3>Download the annotations</h3>
+            <p>Request access on Hugging Face, then download the queries, stages, and visibility records (about 110&nbsp;MB).</p>
+          </div>
+<pre class="code">hf auth login
+hf download 3dlg-hcvc/EgoRecall --repo-type dataset \
+  --local-dir EgoRecall</pre>
+        </div>
+        <div class="card step start-row reveal">
+          <div>
+            <h3>Get ScanNet++</h3>
+            <p>Request access to <a href="https://scannetpp.mlsg.cit.tum.de/scannetpp/">ScanNet++ v2</a> and download the iPhone captures and object annotations of the 183 scenes (about 117&nbsp;GB for the 70 test scenes).</p>
+          </div>
+        </div>
+        <div class="card step start-row reveal">
+          <div>
+            <h3>Prepare and load</h3>
+            <p>Install the code, prepare each scene's frames, cameras, and object boxes, then load a query with the frames up to its query time.</p>
+          </div>
+          <div class="commands">
+<pre class="code">egorecall-prepare --config configs/paths.toml --split test</pre>
+<pre class="code">paths = DatasetPaths.from_toml(Path("configs/paths.toml"))
+dataset = EgoRecallDataset(paths, split="test", stages="1:5")
+with dataset.open_scene(scene_id) as scene_data:
+    sample = scene_data.query(query_idx)</pre>
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ==================== Citation ==================== -->
+  <section class="block" id="citation">
+    <div class="container">
+      <div class="block-header reveal">
+        <h2>Citation</h2>
+        <p class="lede">If you find EgoRecall helpful in your research, please cite our work, and ScanNet++ if you use its data.</p>
+      </div>
+      <div class="citation reveal">
+        <button class="copy-button" type="button" data-copy="bibtex">Copy</button>
+<pre class="code" id="bibtex">@article{tam2026egorecall,
+    title = {{EgoRecall}: {3D} Visual Grounding from Streaming Egocentric Observations},
+    author = {Tam, Hou In Ivan and Savva, Manolis},
+    year = {2026},
+    eprint = {XXXX.XXXXX},
+    archivePrefix = {arXiv}
+}</pre>
+      </div>
+
+      <div class="prose reveal" style="margin-top: 56px;">
+        <p class="eyebrow">Acknowledgements</p>
+        <p>
+          This work was funded in part by a Canada Research Chair, NSERC Discovery Grants, and enabled by support from the
+          <a href="https://alliancecan.ca/">Digital Research Alliance of Canada</a>, and an NVIDIA Academic Grant Award.
+          We thank Austin T. Wang, Denys Iliash, and Weikun Peng for helpful feedback and discussions.
+        </p>
+      </div>
+    </div>
+  </section>
+
+</main>
+
+<footer>
+  <div class="container">
+    <span>EgoRecall · Simon Fraser University</span>
+    <span>Scenes and imagery from <a href="https://scannetpp.mlsg.cit.tum.de/scannetpp/">ScanNet++</a>, used under its terms of use.</span>
+  </div>
+</footer>
+
+</body>
+</html>
