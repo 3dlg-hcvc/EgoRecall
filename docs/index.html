@@ -107,8 +107,27 @@
 
   <figure class="container hero-figure">
     <div class="frame">
-      <a class="zoom" href="static/images/teaser.webp"><img src="static/images/teaser.webp" width="2560" height="945"
-           alt="Left: egocentric frames and a top-down map with the camera trajectory. Right: a query at time 150, “Locate the chair next to the first suitcase I saw”, grounded by recalling when each suitcase and chair was first seen."></a>
+      <video id="hero-video" data-autoplay muted playsinline preload="none" width="1920" height="708"
+             poster="static/images/teaser.webp"
+             aria-label="Animated teaser. Left: egocentric frames and a top-down map that grows along the camera trajectory up to time 150. Right: the query “Locate the chair next to the first suitcase I saw”, grounded by recalling when each suitcase and chair was first seen.">
+        <source src="static/videos/hero.mp4" type="video/mp4">
+      </video>
+      <!-- The animation plays once and keeps the finished figure; the numbered marks play from where each panel starts -->
+      <div class="timeline is-compact" data-timeline="hero-video">
+        <button type="button" class="play-button" aria-label="Play">
+          <svg class="icon-play" viewBox="0 0 16 16" fill="currentColor" aria-hidden="true"><path d="M4 2.5v11a1 1 0 0 0 1.5.86l9-5.5a1 1 0 0 0 0-1.72l-9-5.5A1 1 0 0 0 4 2.5z"/></svg>
+          <svg class="icon-pause" viewBox="0 0 16 16" fill="currentColor" aria-hidden="true"><rect x="3" y="2" width="3.5" height="12" rx="1"/><rect x="9.5" y="2" width="3.5" height="12" rx="1"/></svg>
+          <svg class="icon-replay" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M13.5 8.5a5.5 5.5 0 1 1-1.6-3.9"/><path d="M12.5 2v3.2H9.3"/></svg>
+        </button>
+        <div class="track">
+          <input type="range" min="0" max="17.4" step="0.04" value="0" aria-label="Position in the animation">
+          <div class="markers">
+            <button type="button" class="marker is-stage" data-time="2.4" title="Play from panel 1: the trajectory and top-down view" aria-label="Play from panel 1: the trajectory and top-down view">1</button>
+            <button type="button" class="marker is-stage" data-time="9.04" title="Play from panel 2: the egocentric query" aria-label="Play from panel 2: the egocentric query">2</button>
+            <button type="button" class="marker is-stage" data-time="10.44" title="Play from panel 3: grounding" aria-label="Play from panel 3: grounding">3</button>
+          </div>
+        </div>
+      </div>
     </div>
     <figcaption>
       An agent perceives a scene through a stream of egocentric views.
@@ -321,12 +340,19 @@
               <li><span class="swatch swatch-anchor"></span>Anchor</li>
               <li><span class="swatch swatch-wrong"></span>Wrong pick</li>
             </ul>
-            <p class="viewer-status" id="viewer-status">Loading the scene…</p>
+            <div class="loading viewer-status" id="viewer-status">
+              <span class="loading-text">Loading the scene…</span>
+              <span class="progress" role="progressbar" aria-label="Loading the scene" aria-valuemin="0" aria-valuemax="100"><span class="progress-fill"></span></span>
+            </div>
             <div class="viewer-tooltip" id="viewer-tooltip" hidden></div>
           </div>
           <aside class="explorer-side">
             <div class="frame-panel">
               <video id="explorer-video" muted playsinline preload="auto"></video>
+              <div class="loading frame-status" id="frame-status">
+                <span class="loading-text">Loading the camera frames…</span>
+                <span class="progress" role="progressbar" aria-label="Loading the camera frames" aria-valuemin="0" aria-valuemax="100"><span class="progress-fill"></span></span>
+              </div>
               <span class="frame-label">Camera view · <span id="frame-time">0:00</span></span>
             </div>
             <div class="query-panel" id="query-panel">
@@ -502,11 +528,15 @@
         <p class="lede">We run EgoR-MTU3D on a real recording from Project Aria glasses.</p>
       </div>
       <figure class="card figure-card reveal">
-        <a class="zoom" href="static/images/aria.webp"><img src="static/images/aria.webp" width="2560" height="1483" loading="lazy"
-             alt="Frames from Aria glasses, a 3D map with the wearer's trajectory, and the grounded kettle."></a>
+        <video id="demo-video" data-autoplay muted playsinline controls preload="none" width="1920" height="1080"
+               poster="static/videos/aria.webp"
+               aria-label="The wearer's view from the Aria glasses beside a 3D map that grows as they walk, sped up. At the query, the map flies to the kettle inside EgoR-MTU3D's 3D box; then, as a potential application, a route on the map and an arrow on the floor guide the wearer back to it.">
+          <source src="static/videos/aria.mp4" type="video/mp4">
+        </video>
         <figcaption>
           The recording follows the wearer for 24 minutes through a multi-room apartment, which is mapped into over 2,000 object tracks.
           Asked for “the kettle I used to boil water” 76&nbsp;s after it left the view, while the wearer is in another room, EgoR-MTU3D grounds the kettle in 3D, a location that can guide the user back to it.
+          In the clip, a route along places the wearer walked and an arrow on the floor illustrate that guidance.
         </figcaption>
       </figure>
     </div>

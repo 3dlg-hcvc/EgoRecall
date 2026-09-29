@@ -371,6 +371,26 @@ h3 { margin: 0 0 8px; color: var(--ink); font-size: 21px; line-height: 1.3; font
   font-size: 12px;
   font-variant-numeric: tabular-nums;
 }
+/* Download progress in the 3D view and over the camera panel: a label with the percentage above a bar that fills; the
+   bar slides when the server gives no file size */
+.loading { display: grid; justify-items: center; gap: 10px; font-variant-numeric: tabular-nums; }
+.loading[hidden] { display: none; }
+.progress { position: relative; width: 180px; height: 6px; overflow: hidden; border-radius: 3px; background: var(--line); }
+.progress-fill {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: 0;
+  width: 0;
+  border-radius: 3px;
+  background: var(--blue);
+  transition: width 0.2s linear;
+}
+.loading.is-indeterminate .progress-fill { width: 30%; animation: progress-slide 1.2s ease-in-out infinite; }
+@keyframes progress-slide { from { left: -30%; } to { left: 100%; } }
+.frame-status { position: absolute; inset: 0; align-content: center; background: rgba(21, 26, 36, 0.6); color: #fff; font-size: 13.5px; }
+.frame-status .progress { width: 60%; max-width: 180px; background: rgba(255, 255, 255, 0.25); }
+.frame-status .progress-fill { background: #fff; }
 .query-panel {
   flex: 1;
   min-height: 0;
@@ -670,6 +690,34 @@ figure { margin: 0; }
 .zoom { display: block; cursor: zoom-in; }
 .figure-card figcaption { margin-top: 12px; color: var(--muted); font-size: 14.5px; line-height: 1.6; }
 
+/* ---------- Videos: the hero animation and the Aria clip ---------- */
+
+.figure-card video, .hero-figure video { display: block; width: 100%; height: auto; border-radius: 8px; }
+/* The hero's timeline: the explorer's, smaller, with numbered marks where the teaser's three panels start */
+.timeline.is-compact { gap: 12px; margin-top: 12px; }
+.timeline.is-compact .play-button { display: grid; place-items: center; width: 32px; height: 32px; padding: 0; }
+.timeline.is-compact .track { height: 32px; }
+.play-button svg { display: none; width: 12px; height: 12px; }
+.play-button[data-state="paused"] .icon-play,
+.play-button[data-state="playing"] .icon-pause,
+.play-button[data-state="ended"] .icon-replay { display: block; }
+.marker.is-stage {
+  top: -1px;
+  display: grid;
+  place-items: center;
+  width: 16px;
+  height: 16px;
+  margin-left: -8px;
+  border-width: 1.5px;
+  background: var(--ink);
+  color: #fff;
+  font-size: 9.5px;
+  font-weight: 700;
+  line-height: 1;
+}
+.marker.is-stage:hover { background: var(--blue); }
+html:not(.js) .timeline.is-compact { display: none; }
+
 /* ---------- Get started ---------- */
 
 .start-list { display: grid; gap: 16px; }
@@ -727,6 +775,7 @@ footer a { color: var(--muted); }
   html { scroll-behavior: auto; }
   .js .reveal { opacity: 1; transform: none; transition: none; }
   .button, .topbar { transition: none; }
+  .loading.is-indeterminate .progress-fill { width: 100%; animation: none; opacity: 0.5; }
 }
 
 /* ---------- Narrower screens ---------- */

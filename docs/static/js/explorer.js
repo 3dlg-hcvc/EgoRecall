@@ -78,6 +78,41 @@ async function fetchBuffer(url) {
   return response.arrayBuffer();
 }
 
+// Fetch a whole file as a Blob, calling onProgress(received, total) after each chunk; total is the Content-Length, or 0
+// when the server sends none
+async function fetchWithProgress(url, onProgress, options = {}) {
+  const response = await fetch(url, options);
+  if (!response.ok) throw new Error(`${url}: ${response.status}`);
+  const total = Number(response.headers.get("Content-Length")) || 0;
+  const reader = response.body.getReader();
+  const chunks = [];
+  let received = 0;
+  for (;;) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    chunks.push(value);
+    received += value.length;
+    onProgress(received, total);
+  }
+  return new Blob(chunks, { type: response.headers.get("Content-Type") ?? "" });
+}
+
+// A progress callback that fills a loading element's bar and adds the percentage to its label; without a known size,
+// the bar slides instead
+function showProgress(status, label) {
+  const text = status.querySelector(".loading-text");
+  const bar = status.querySelector(".progress");
+  const fill = status.querySelector(".progress-fill");
+  return (received, total) => {
+    status.classList.toggle("is-indeterminate", !total);
+    if (!total) return;
+    const percent = Math.min(100, Math.round((100 * received) / total));
+    text.textContent = `${label} ${percent}%`;
+    fill.style.width = `${percent}%`;
+    bar.setAttribute("aria-valuenow", String(percent));
+  };
+}
+
 // ---------- Scene data ----------
 
 // Box corners from an oriented box: rows of `axes` are the unit axis vectors, `size` the full side lengths
@@ -172,14 +207,18 @@ class Explorer {
     this.loading = true;
     const status = this.root.querySelector("#viewer-status");
     try {
-      const [meta, objects, queries, points, trajectory] = await Promise.all([
-        fetchJson(this.base + "meta.json"),
+      // The scene's description first: it names the camera video, which then downloads beside the scene files at a
+      // lower priority, with its own progress in the camera panel
+      this.meta = await fetchJson(this.base + "meta.json");
+      this.bindVideo();
+      const [objects, queries, points, trajectory] = await Promise.all([
         fetchJson(this.base + "objects.json"),
         fetchJson(this.base + "queries.json"),
-        fetchBuffer(this.base + "points.bin"),
+        // The points are nearly all of the scene's bytes, so their download stands for the scene's progress
+        fetchWithProgress(this.base + "points.bin", showProgress(status, "Loading the scene…"))
+          .then((blob) => blob.arrayBuffer()),
         fetchBuffer(this.base + "trajectory.bin"),
       ]);
-      this.meta = meta;
       this.objects = objects;
       this.objectById = new Map(objects.map((object) => [object.id, object]));
       this.queries = queries;
@@ -188,7 +227,6 @@ class Explorer {
       this.buildViewer(points);
       this.buildTimeline();
       this.buildQueryList();
-      this.bindVideo();
       this.setFrame(0);
       status.hidden = true;
       this.animate();
@@ -559,7 +597,9 @@ class Explorer {
     const tick = (now) => {
       const elapsed = Math.min((now - previous) / 1000, 0.1);
       previous = now;
-      if (this.playing) {
+      // Time moves only once the camera frames are ready, so the camera panel never shows a stale or empty frame; a
+      // play request made earlier starts then
+      if (this.playing && this.framesReady) {
         const next = this.frame + elapsed * this.meta.fps * this.speed;
         if (next >= this.meta.num_frames - 1) this.setPlaying(false);
         this.setFrame(next);
@@ -593,16 +633,27 @@ class Explorer {
     });
     this.pendingFrame = null;
 
-    // Fetch the whole video once, so seeking works on any web server, including ones without range requests
-    fetch(this.base + this.meta.video.file)
-      .then((response) => response.blob())
+    // Fetch the whole video once, so seeking works on any web server, including ones without range requests. The camera
+    // panel shows the download's progress until the first frame is decoded, and playback waits for it; if the video
+    // cannot be loaded, the scene plays without it.
+    const status = this.root.querySelector("#frame-status");
+    fetchWithProgress(this.base + this.meta.video.file, showProgress(status, "Loading the camera frames…"), {
+      priority: "low",
+    })
       .then((blob) => {
         this.videoUrl = URL.createObjectURL(blob);
         this.video.addEventListener("loadeddata", () => {
           this.seeking = false;
           this.seekVideo(Math.floor(this.frame));
+          this.framesReady = true;
+          status.hidden = true;
         }, { once: true });
         this.video.src = this.videoUrl;
+      })
+      .catch((error) => {
+        console.error(error);
+        status.textContent = "The camera frames could not be loaded.";
+        this.framesReady = true;
       });
   }
 

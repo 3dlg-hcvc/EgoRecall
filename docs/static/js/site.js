@@ -1,4 +1,5 @@
-// EgoRecall project page: sticky bar, reveal-on-scroll, BibTeX copy, hover hints, charts, and the category cloud.
+// EgoRecall project page: sticky bar, reveal-on-scroll, videos, BibTeX copy, hover hints, charts, and the category
+// cloud.
 // Dataset charts read static/data/stats.json (written by the maintainers' stats script from the released
 // annotations); result charts use the paper's numbers.
 
@@ -38,6 +39,130 @@ function initReveal() {
     }
   }, { rootMargin: "0px 0px -8% 0px" });
   document.querySelectorAll(".reveal").forEach((element) => observer.observe(element));
+}
+
+// ---------- Videos: the hero animation and the Aria clip ----------
+// Each plays once while at least half of it is in view and stops on its last frame, which completes the figure.
+// Scrolling away pauses it and coming back resumes it; a pause by the viewer, or the end, holds. With reduced motion,
+// the videos wait for the viewer.
+
+// Each file is fetched whole and played from memory, because seeking needs HTTP range requests, which simple local
+// servers such as python -m http.server do not answer; the files are a few megabytes. If the fetch fails, the video
+// streams from its <source> instead.
+const wholeVideos = new Map();
+
+function loadWhole(video) {
+  if (!wholeVideos.has(video)) {
+    const source = video.querySelector("source");
+    const loading = fetch(source.src)
+      .then((response) => {
+        if (!response.ok) throw new Error(`HTTP ${response.status}`);
+        return response.blob();
+      })
+      .then((blob) => {
+        // A viewer may have started the video from its source with the browser's controls in the meantime
+        if (video.readyState !== HTMLMediaElement.HAVE_NOTHING) return;
+        source.remove();
+        // Decode from memory at once, so seeking shows frames before the first play
+        video.preload = "auto";
+        video.src = URL.createObjectURL(blob);
+      })
+      .catch((error) => console.warn(`${source.src} could not be fetched whole, so it streams instead.`, error));
+    wholeVideos.set(video, loading);
+  }
+  return wholeVideos.get(video);
+}
+
+// Browsers may refuse to play a video the viewer has not clicked, for example to save power, and a pause during
+// loading cancels play(); in both cases the video stays paused.
+function playVideo(video) {
+  return loadWhole(video).then(() => video.play()).catch(() => {});
+}
+
+// The hero's timeline: play, pause, and replay; a scrubber that pauses the video where it is left, so a stage can be
+// read; and numbered marks that play from where each of the teaser's panels starts
+function initTimeline(timeline) {
+  const video = document.getElementById(timeline.dataset.timeline);
+  const button = timeline.querySelector(".play-button");
+  const scrubber = timeline.querySelector("input[type=range]");
+
+  const showState = () => {
+    const state = video.ended ? "ended" : video.paused ? "paused" : "playing";
+    button.dataset.state = state;
+    button.setAttribute("aria-label", { ended: "Replay", paused: "Play", playing: "Pause" }[state]);
+  };
+  // While the video plays, move the scrubber on every display frame
+  const follow = () => {
+    scrubber.value = String(video.currentTime);
+    if (!video.paused) requestAnimationFrame(follow);
+  };
+  video.addEventListener("play", () => {
+    showState();
+    requestAnimationFrame(follow);
+  });
+  ["pause", "ended", "seeked"].forEach((type) => video.addEventListener(type, showState));
+
+  button.addEventListener("click", () => (video.paused ? playVideo(video) : video.pause()));
+  scrubber.addEventListener("input", () => {
+    video.pause();
+    loadWhole(video).then(() => {
+      video.currentTime = Number(scrubber.value);
+    });
+  });
+  timeline.querySelectorAll(".marker").forEach((marker) => {
+    const time = Number(marker.dataset.time);
+    marker.style.left = `${(100 * time) / Number(scrubber.max)}%`;
+    marker.addEventListener("click", () => {
+      loadWhole(video).then(() => {
+        video.currentTime = time;
+        scrubber.value = String(time);
+        playVideo(video);
+      });
+    });
+  });
+  showState();
+}
+
+function initVideos() {
+  document.querySelectorAll("[data-timeline]").forEach(initTimeline);
+  const videos = document.querySelectorAll("video[data-autoplay]");
+
+  // Fetch each file once its video comes within a screen's height of the view
+  const loader = new IntersectionObserver((entries) => {
+    for (const { target: video, isIntersecting } of entries) {
+      if (!isIntersecting) continue;
+      loader.unobserve(video);
+      loadWhole(video);
+    }
+  }, { rootMargin: "100% 0px" });
+  videos.forEach((video) => loader.observe(video));
+
+  if (window.matchMedia("(prefers-reduced-motion: reduce)").matches) return;
+  const inView = new Set();
+  const held = new Set(); // paused by the viewer, or at the end
+  const scrolledAway = new Set(); // paused by scrolling away, to resume on return
+  const player = new IntersectionObserver((entries) => {
+    for (const { target: video, isIntersecting } of entries) {
+      if (isIntersecting) {
+        inView.add(video);
+        // The file may still be loading; play only if the video is still in view once it has arrived
+        if (!held.has(video)) loadWhole(video).then(() => inView.has(video) && playVideo(video));
+      } else {
+        inView.delete(video);
+        if (!video.paused) {
+          scrolledAway.add(video);
+          video.pause();
+        }
+      }
+    }
+  }, { threshold: 0.5 });
+  videos.forEach((video) => {
+    video.addEventListener("pause", () => {
+      if (!scrolledAway.delete(video)) held.add(video);
+    });
+    video.addEventListener("play", () => held.delete(video));
+    player.observe(video);
+  });
 }
 
 // ---------- BibTeX copy button ----------
@@ -282,6 +407,7 @@ async function loadStats() {
 document.addEventListener("DOMContentLoaded", async () => {
   initTopbar();
   initReveal();
+  initVideos();
   initCopyButtons();
   initTooltips();
   const stats = await loadStats();
