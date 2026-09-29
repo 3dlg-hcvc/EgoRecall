@@ -1,12 +1,11 @@
-# EgoRecall
+![EgoRecall: 3D Visual Grounding from Streaming Egocentric Observations](docs/static/images/social.jpg)
 
-### EgoRecall: 3D Visual Grounding from Streaming Egocentric Observations
+[Hou In Ivan Tam](https://iv-t.github.io/), [Manolis Savva](https://msavva.github.io/) \
+Simon Fraser University
 
-[Hou In Ivan Tam](https://iv-t.github.io/), [Manolis Savva](https://msavva.github.io/)
-
-<img src="docs/static/images/teaser.webp" alt="teaser" style="width:100%"/>
-
-[Page](https://3dlg-hcvc.github.io/EgoRecall/) | [Paper]() | [Data](https://huggingface.co/datasets/3dlg-hcvc/EgoRecall)
+[![Project Page](https://img.shields.io/badge/Project%20Page-1d5fb8?style=for-the-badge&logo=data:image%2Fsvg%2Bxml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjggNSA0NiA1NCI%2BPHBhdGggZmlsbD0iI2ZmZiIgZD0iTTkgNmg0M3YxMEgxOXYzMmgzM3YxMEg5eiIvPjxwYXRoIGZpbGw9IiM5Y2MyZWYiIGQ9Ik0xOSAzMlEzNiAxMSA1MyAzMlEzNiA1MyAxOSAzMloiLz48Y2lyY2xlIGN4PSIzNiIgY3k9IjMyIiByPSI1LjUiIGZpbGw9IiMyYjRjN2UiLz48L3N2Zz4=)](https://3dlg-hcvc.github.io/EgoRecall/)
+[![Paper](https://img.shields.io/badge/Paper-b31b1b?style=for-the-badge&logo=arxiv&logoColor=white)]()
+[![Dataset](https://img.shields.io/badge/Dataset-FFD21E?style=for-the-badge&logo=huggingface&logoColor=000)](https://huggingface.co/datasets/3dlg-hcvc/EgoRecall)
 
 
 
@@ -74,6 +73,12 @@ cache_root = "/path/to/egorecall_cache"     # directory for storing step 4's out
 ### 4. Prepare Observations
 Extract relevant data from the ScanNet++ files using our command-line tools.
 The prepared files are stored in `cache_root` and are ready for use by our Python API for training and evaluation.
+
+To prepare all splits and check everything afterward, run:
+```bash
+for s in train val test; do egorecall-prepare --config configs/paths.toml --split $s; done
+egorecall-check --config configs/paths.toml --source --cache
+```
 
 `egorecall-prepare` reads each scene's ScanNet++ files and packs its sampled frames, cameras, and object boxes into one H5 file in `cache_root`.
 ```bash
