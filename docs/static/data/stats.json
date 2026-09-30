@@ -1,0 +1,240 @@
+{
+ "totals": {
+  "queries": 2248240,
+  "scenes": 183,
+  "hours": 12.063148148148148,
+  "objects": 21331,
+  "object_categories": 1366,
+  "target_categories": 1366,
+  "operators": 22
+ },
+ "splits": [
+  {
+   "split": "train",
+   "scenes": 100,
+   "hours": 6.448611111111111,
+   "objects": 11582,
+   "queries": 1202906,
+   "stages": null
+  },
+  {
+   "split": "val",
+   "scenes": 13,
+   "hours": 0.7841666666666667,
+   "objects": 1616,
+   "queries": 165340,
+   "stages": 83
+  },
+  {
+   "split": "test",
+   "scenes": 70,
+   "hours": 4.83037037037037,
+   "objects": 8133,
+   "queries": 879994,
+   "stages": 440
+  }
+ ],
+ "visibility_groups": {
+  "visible": 0.2,
+  "mixed": 0.15,
+  "hidden_fresh": 0.15,
+  "hidden_mid": 0.2,
+  "hidden_deep": 0.2,
+  "hidden_vdeep": 0.1
+ },
+ "program_depth": {
+  "1": 0.17778484503433797,
+  "2": 0.822215154965662
+ },
+ "axes": {
+  "history": 0.520565864854286,
+  "egocentric": 0.6647595452442799,
+  "allocentric": 0.2680945984414475
+ },
+ "axis_combinations": {
+  "egocentric": 0.3099740241255382,
+  "history+egocentric": 0.24298651389531367,
+  "history": 0.1558445717539053,
+  "history+allocentric": 0.12173477920506708,
+  "egocentric+allocentric": 0.1117990072234281,
+  "allocentric": 0.03456081201295235,
+  "none": 0.023100291783795326
+ },
+ "targets": {
+  "mean": 1.6084595061025513,
+  "multiple": 0.42162402590470766,
+  "any_of": 0.010852489058107675
+ },
+ "top_target_categories": [
+  {
+   "label": "box",
+   "targets": 200287
+  },
+  {
+   "label": "chair",
+   "targets": 173376
+  },
+  {
+   "label": "cabinet",
+   "targets": 142846
+  },
+  {
+   "label": "table",
+   "targets": 140024
+  },
+  {
+   "label": "ceiling lamp",
+   "targets": 133745
+  },
+  {
+   "label": "door",
+   "targets": 116965
+  },
+  {
+   "label": "window",
+   "targets": 114951
+  },
+  {
+   "label": "monitor",
+   "targets": 105004
+  },
+  {
+   "label": "power socket",
+   "targets": 92828
+  },
+  {
+   "label": "office chair",
+   "targets": 81785
+  },
+  {
+   "label": "light switch",
+   "targets": 64157
+  },
+  {
+   "label": "bottle",
+   "targets": 63409
+  },
+  {
+   "label": "book",
+   "targets": 59693
+  },
+  {
+   "label": "bag",
+   "targets": 58353
+  },
+  {
+   "label": "heater",
+   "targets": 56655
+  },
+  {
+   "label": "keyboard",
+   "targets": 56211
+  },
+  {
+   "label": "ceiling light",
+   "targets": 55311
+  },
+  {
+   "label": "pillow",
+   "targets": 54975
+  },
+  {
+   "label": "plant",
+   "targets": 54608
+  },
+  {
+   "label": "blinds",
+   "targets": 48918
+  },
+  {
+   "label": "books",
+   "targets": 45213
+  },
+  {
+   "label": "cable raceway",
+   "targets": 41983
+  },
+  {
+   "label": "picture",
+   "targets": 39935
+  },
+  {
+   "label": "mouse",
+   "targets": 36153
+  },
+  {
+   "label": "backpack",
+   "targets": 35101
+  },
+  {
+   "label": "curtain",
+   "targets": 33208
+  },
+  {
+   "label": "plant pot",
+   "targets": 31263
+  },
+  {
+   "label": "shelf",
+   "targets": 29921
+  },
+  {
+   "label": "kitchen cabinet",
+   "targets": 26643
+  },
+  {
+   "label": "computer tower",
+   "targets": 26201
+  }
+ ],
+ "examples": {
+  "history": [
+   {
+    "scene_id": "61adeff7d5",
+    "query_idx": 10551,
+    "description": "the earliest heater",
+    "program": "first_seen(heater)",
+    "query_seconds": 182.0,
+    "visible_targets": 0,
+    "hidden_targets": 1,
+    "seconds_out_of_view": 109.16666666666667
+   }
+  ],
+  "egocentric": [
+   {
+    "scene_id": "61adeff7d5",
+    "query_idx": 9128,
+    "description": "the cabinet closest to me",
+    "program": "nearest_to_cam(cabinet)",
+    "query_seconds": 152.0,
+    "visible_targets": 0,
+    "hidden_targets": 1,
+    "seconds_out_of_view": 51.666666666666664
+   }
+  ],
+  "allocentric": [
+   {
+    "scene_id": "61adeff7d5",
+    "query_idx": 10456,
+    "description": "the paper roll nearest to the first shoes that appeared",
+    "program": "nearest(first_seen(shoes), paper roll)",
+    "query_seconds": 180.0,
+    "visible_targets": 0,
+    "hidden_targets": 1,
+    "seconds_out_of_view": 45.666666666666664
+   }
+  ],
+  "construction": [
+   {
+    "scene_id": "61adeff7d5",
+    "query_idx": 5743,
+    "description": "the floor mat to the left of the earliest boxes",
+    "program": "left_of(first_seen(box), floor mat)",
+    "query_seconds": 90.0,
+    "visible_targets": 0,
+    "hidden_targets": 1,
+    "seconds_out_of_view": 14.833333333333334
+   }
+  ]
+ }
+}

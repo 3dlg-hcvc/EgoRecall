@@ -1,0 +1,300 @@
+"""
+Detect stale, corrupted, or malformed scene caches with the standalone cache checks.
+"""
+
+import json
+from pathlib import Path
+
+import h5py
+import numpy as np
+import pytest
+
+from egorecall import DatasetPaths
+from egorecall.data.scannetpp import ScanNetPPScene
+from egorecall.data.scene_h5 import CACHE_VERSION, SceneH5, camera_sha256, object_geometry_sha256
+from egorecall.geometry import CameraSequence
+from egorecall.integrity import fingerprint_file
+from egorecall.validation.cache import validate_cache_compatibility, validate_scene_cache
+from egorecall.validation.check import check_dataset, check_source_scenes
+from tests.helpers import add_manifest_hashes
+
+
+def test_stale_source_and_wrong_timeline_fail(raw_root: Path, prepared_cache: Path, ffmpeg_path: str) -> None:
+    """
+    The source/cache checker detects changed inputs; preparation leaves existing files untouched.
+
+    Args:
+        raw_root: Source scene to change after preparation.
+        prepared_cache: Completed cache to preserve.
+        ffmpeg_path: FFmpeg executable.
+    """
+    source_scene = ScanNetPPScene(raw_root, "scene_a")
+    before = fingerprint_file(prepared_cache / "scene_a.h5")
+    paths = DatasetPaths(scannetpp_root=raw_root, cache_root=prepared_cache)
+    with pytest.raises(ValueError, match="sampling stride is 10, expected 5"):
+        check_source_scenes(paths, ["scene_a"], 5, check_cache=True)
+
+    exif = source_scene.iphone_exif_path
+    exif.write_text(exif.read_text() + "\n")
+    with pytest.raises(ValueError, match="source files changed"):
+        check_source_scenes(paths, ["scene_a"], 10, check_cache=True)
+    assert fingerprint_file(prepared_cache / "scene_a.h5") == before
+
+
+def test_corrupt_cached_payload_fails(prepared_cache: Path) -> None:
+    """
+    Detect changed encoded pixels in the standalone checker, including an interior frame not selected for full decoding.
+
+    Args:
+        prepared_cache: Completed cache whose second RGB payload will be replaced.
+    """
+    path = prepared_cache / "scene_a.h5"
+    with h5py.File(path, "r+") as cache:
+        cache["frames/rgb_jpg"][1] = cache["frames/rgb_jpg"][0]
+
+    with pytest.raises(ValueError, match="checksum mismatch"):
+        validate_scene_cache(path)
+
+
+@pytest.mark.parametrize(
+    ("attribute", "value"),
+    [
+        ("schema_version", float(CACHE_VERSION)),
+        ("subsample_factor", 10.5),
+        ("rgb_resolution", [32.5, 24.0]),
+        ("scene_id", "../scene_a"),
+        ("source_fps", "60"),
+    ],
+)
+def test_invalid_cache_metadata_fails(prepared_cache: Path, attribute: str, value: object) -> None:
+    """
+    Reject malformed metadata instead of coercing it into apparently valid values.
+
+    Args:
+        prepared_cache: Cache whose metadata will be changed.
+        attribute: Required attribute to corrupt.
+        value: Invalid replacement value.
+    """
+    path = prepared_cache / "scene_a.h5"
+    with h5py.File(path, "r+") as cache:
+        cache.attrs[attribute] = value
+
+    with pytest.raises(ValueError):
+        validate_scene_cache(path)
+
+
+def test_cache_geometry_is_compared_with_source(package_root: Path, raw_root: Path, prepared_cache: Path) -> None:
+    """
+    Explicit source checking detects different boxes even in a cache with a valid geometry checksum.
+
+    Args:
+        package_root: Annotation package with unchanged object IDs and labels.
+        raw_root: Original source boxes.
+        prepared_cache: Cache whose box centre will be changed consistently with its checksum.
+    """
+    path = prepared_cache / "scene_a.h5"
+    with SceneH5(path) as cache:
+        objects = cache.objects()
+    objects[1].centroid[0] += 0.25
+    with h5py.File(path, "r+") as cache:
+        cache["objects/centroid"][0] = objects[1].centroid
+        cache["objects"].attrs["sha256"] = object_geometry_sha256(objects)
+
+    add_manifest_hashes(package_root)
+    paths = DatasetPaths(package_root, raw_root, prepared_cache)
+    assert check_dataset(paths, scene_ids=["scene_a"], check_cache=True).cache_scenes == 1
+    with pytest.raises(ValueError, match="cached object geometry differs"):
+        check_dataset(paths, scene_ids=["scene_a"], check_cache=True, check_source=True)
+
+
+def test_source_geometry_changes_invalidate_cache(raw_root: Path, prepared_cache: Path, ffmpeg_path: str) -> None:
+    """
+    Reject reuse when source box values change even though the observation files are unchanged.
+
+    Args:
+        raw_root: Source scene to edit after preparation.
+        prepared_cache: Completed cache to preserve.
+        ffmpeg_path: FFmpeg executable.
+    """
+    path = raw_root / "data/scene_a/scans/segments_anno.json"
+    scene_annotations = json.loads(path.read_text())
+    scene_annotations["segGroups"][0]["obb"]["centroid"][0] += 0.25
+    path.write_text(json.dumps(scene_annotations))
+    before = fingerprint_file(prepared_cache / "scene_a.h5")
+
+    with pytest.raises(ValueError, match="source files changed"):
+        check_source_scenes(
+            DatasetPaths(scannetpp_root=raw_root, cache_root=prepared_cache), ["scene_a"], 10, check_cache=True
+        )
+    assert fingerprint_file(prepared_cache / "scene_a.h5") == before
+
+
+@pytest.mark.parametrize("change", ["centroid", "label", "duplicate_id", "missing_geometry"])
+def test_invalid_cached_objects_fail(prepared_cache: Path, change: str) -> None:
+    """
+    Reject missing, structurally invalid, or changed object data during the explicit cache check.
+
+    Args:
+        prepared_cache: Cache to corrupt.
+        change: Object-table change to introduce.
+    """
+    path = prepared_cache / "scene_a.h5"
+    with h5py.File(path, "r+") as cache:
+        if change == "centroid":
+            cache["objects/centroid"][0, 0] += 0.25
+        elif change == "label":
+            cache["objects/label"][0] = "desk"
+        elif change == "duplicate_id":
+            cache["objects/object_id"][1] = 1
+        else:
+            del cache["objects"]
+
+    with pytest.raises((ValueError, KeyError)):
+        validate_scene_cache(path)
+
+
+@pytest.mark.parametrize("change", ["pose", "intrinsic", "timestamp", "frame_name"])
+def test_changed_cached_cameras_fail(prepared_cache: Path, change: str) -> None:
+    """
+    Detect edited camera values or frame names through the camera checksum, without the raw source.
+
+    Args:
+        prepared_cache: Cache to change.
+        change: Camera field to edit while keeping its values structurally valid.
+    """
+    path = prepared_cache / "scene_a.h5"
+    with h5py.File(path, "r+") as cache:
+        if change == "pose":
+            cache["camera/aligned_pose"][0, 0, 3] += 0.5
+        elif change == "intrinsic":
+            cache["camera/intrinsic"][0, 0, 0] += 1.0
+        elif change == "timestamp":
+            cache["camera/timestamp"][0] -= 0.001
+        else:
+            cache["frames/names"][0] = "frame_000001"
+
+    with pytest.raises(ValueError, match="camera checksum mismatch"):
+        validate_scene_cache(path)
+
+
+def test_unsupported_cache_schema_fails(prepared_cache: Path) -> None:
+    """
+    Reject a cache whose schema_version is not 3, the only supported cache layout.
+
+    Args:
+        prepared_cache: Cache whose schema_version will be changed.
+    """
+    path = prepared_cache / "scene_a.h5"
+    with h5py.File(path, "r+") as cache:
+        cache.attrs["schema_version"] = 1
+
+    with pytest.raises(ValueError, match="unsupported scene-cache format or schema_version"):
+        validate_scene_cache(path)
+
+
+@pytest.mark.parametrize(
+    ("setting", "value", "message"),
+    [
+        ("scene_id", "scene_b", "cache holds scene 'scene_a', expected 'scene_b'"),
+        ("subsample_factor", 5, "cache sampling stride is 10, expected 5"),
+        ("source_fps", 30.0, "cache source_fps is 60.0, expected 30.0"),
+        ("frame_names", ("frame_000000",), "cached frame names differ from the expected timeline"),
+    ],
+)
+def test_cache_mismatch_names_the_setting(prepared_cache: Path, setting: str, value: object, message: str) -> None:
+    """
+    Report which cache setting differs: the scene, sampling stride, source frame rate, or frame names.
+
+    Args:
+        prepared_cache: Cache prepared for scene_a with stride 10 at 60 FPS.
+        setting: Expected setting to change.
+        value: Setting value that differs from the cache.
+        message: Expected error text.
+    """
+    expected = {
+        "scene_id": "scene_a",
+        "frame_names": ("frame_000000", "frame_000010", "frame_000020"),
+        "subsample_factor": 10,
+        "source_fps": 60.0,
+    }
+    with h5py.File(prepared_cache / "scene_a.h5", "r") as h5_file:
+        validate_cache_compatibility(h5_file, **expected)
+
+        with pytest.raises(ValueError, match=message):
+            validate_cache_compatibility(h5_file, **{**expected, setting: value})
+
+
+def test_cache_cameras_are_compared_with_source(package_root: Path, raw_root: Path, prepared_cache: Path) -> None:
+    """
+    Explicit source checking detects a changed camera pose even in a cache with a valid camera checksum.
+
+    Args:
+        package_root: Annotation package for the cached scene.
+        raw_root: Original source cameras.
+        prepared_cache: Cache whose first pose will be changed consistently with its checksum.
+    """
+    with h5py.File(prepared_cache / "scene_a.h5", "r+") as cache:
+        cache["camera/aligned_pose"][0, 0, 3] += 0.5
+        cameras = CameraSequence(
+            tuple(cache["frames/names"].asstr()[:]),
+            cache["camera/aligned_pose"][:],
+            cache["camera/intrinsic"][:],
+            cache["camera/timestamp"][:],
+            (32, 24),
+        )
+        cache["camera"].attrs["sha256"] = camera_sha256(cameras)
+
+    add_manifest_hashes(package_root)
+    paths = DatasetPaths(package_root, raw_root, prepared_cache)
+    assert check_dataset(paths, scene_ids=["scene_a"], check_cache=True).cache_scenes == 1
+    with pytest.raises(ValueError, match="cached camera values differ from the source"):
+        check_dataset(paths, scene_ids=["scene_a"], check_cache=True, check_source=True)
+
+
+@pytest.mark.parametrize(
+    ("change", "message"),
+    [
+        ("source_fps", "finite and positive"),
+        ("depth_resolution", "Invalid cache depth_resolution"),
+        ("fingerprints", "must contain source fingerprints"),
+        ("digest", "invalid source SHA-256 digest"),
+        ("camera_dtype", "expected float64 values"),
+        ("image_count", "image count does not match"),
+        ("object_id_dtype", "one-dimensional int64 array"),
+    ],
+)
+def test_invalid_cache_structure_fails(prepared_cache: Path, change: str, message: str) -> None:
+    """
+    Reject cache attributes and datasets whose values, types, or sizes do not follow the cache layout.
+
+    Args:
+        prepared_cache: Cache to change.
+        change: Attribute or dataset to make invalid.
+        message: Expected error text.
+    """
+    path = prepared_cache / "scene_a.h5"
+    with h5py.File(path, "r+") as cache:
+        if change == "source_fps":
+            cache.attrs["source_fps"] = 0.0
+        elif change == "depth_resolution":
+            cache.attrs["depth_resolution"] = (128, 96)
+        elif change == "fingerprints":
+            cache.attrs["source_files"] = "{}"
+        elif change == "digest":
+            fingerprints = json.loads(cache.attrs["source_files"])
+            fingerprints["iphone/exif.json"]["sha256"] = "not-a-digest"
+            cache.attrs["source_files"] = json.dumps(fingerprints)
+        elif change == "camera_dtype":
+            timestamps = cache["camera/timestamp"][:]
+            del cache["camera/timestamp"]
+            cache.create_dataset("camera/timestamp", data=timestamps.astype(np.float32))
+        elif change == "image_count":
+            del cache["frames/mask_png"]
+            cache.create_dataset("frames/mask_png", (2,), dtype=h5py.vlen_dtype(np.uint8))
+        else:
+            object_ids = cache["objects/object_id"][:]
+            del cache["objects/object_id"]
+            cache.create_dataset("objects/object_id", data=object_ids.astype(np.int32))
+
+    with pytest.raises(ValueError, match=message):
+        validate_scene_cache(path)

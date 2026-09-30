@@ -1,0 +1,10 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64">
+  <!-- An E whose middle stroke is an eye. The letter is dark blue in light browser themes and light in dark ones. -->
+  <style>.ink { fill: #2b4c7e; } @media (prefers-color-scheme: dark) { .ink { fill: #e8eaed; } }</style>
+  <rect class="ink" x="9" y="6" width="10" height="52" rx="2.5"/>
+  <rect class="ink" x="9" y="6" width="43" height="10" rx="2.5"/>
+  <rect class="ink" x="9" y="48" width="43" height="10" rx="2.5"/>
+  <!-- The eye spans x 19 to 53 around y 32; its pupil sits at the centre, (36, 32) -->
+  <path d="M 19 32 Q 36 11 53 32 Q 36 53 19 32 Z" fill="#9cc2ef"/>
+  <circle cx="36" cy="32" r="5.5" fill="#2b4c7e"/>
+</svg>

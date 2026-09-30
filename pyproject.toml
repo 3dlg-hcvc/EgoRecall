@@ -1,0 +1,39 @@
+[build-system]
+requires = ["setuptools>=77"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "egorecall"
+version = "0.1.0"
+description = "EgoRecall: 3D Visual Grounding from Streaming Egocentric Observations"
+readme = "README.md"
+requires-python = ">=3.12"
+license = "MIT"
+license-files = ["LICENSE", "ATTRIBUTION.md"]
+dependencies = ["pyarrow>=18", "numpy>=1.26", "h5py>=3.11", "pillow>=11", "lz4>=4"]
+
+[project.optional-dependencies]
+dev = ["pytest>=8", "ruff>=0.11"]
+hub = ["datasets>=4", "huggingface_hub>=1"]
+
+[project.scripts]
+egorecall-prepare = "egorecall.cli.prepare_scannetpp:main"
+egorecall-check = "egorecall.cli.check_dataset:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-ra"
+markers = ["integration: requires a local EgoRecall package via EGORECALL_TEST_DATASET"]
+
+[tool.ruff]
+target-version = "py312"
+line-length = 120
+
+[tool.ruff.lint]
+select = ["E4", "E7", "E9", "E501", "F", "I", "UP"]
+
+[tool.ruff.format]
+quote-style = "double"
