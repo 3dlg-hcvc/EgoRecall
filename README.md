@@ -157,7 +157,7 @@ If you find EgoRecall helpful in your research, please cite our work:
     archivePrefix = {arXiv}
 }
 ```
-Please also cite [ScanNet++](https://scannetpp.mlsg.cit.tum.de/scannetpp/) if you use the ScanNet++ data in your work.
+EgoRecall is built on [ScanNet++](https://scannetpp.mlsg.cit.tum.de/scannetpp/), so please cite it as well.
 
 
 ## Acknowledgements
