@@ -475,15 +475,15 @@
                 <th data-tip="Selection F1: how well the method picks among the objects available to it. Uncovered targets are left out, so this measures the choosing alone; read it with Cov%, since a method can choose well yet cover few targets.">F1<sub>sel</sub></th>
                 <th data-tip="Full F1: how well the method finds each query's targets overall, counting both wrong picks and missed targets, including uncovered ones. Compare methods by this number.">F1<sub>full</sub></th>
                 <th data-tip="Top-1: how often the method's single best guess is a correct target.">Top-1</th>
-                <th class="split" data-tip="Temporal: when objects were seen, as in “the chair I saw first” or “the mug I saw most recently”.">temp<span class="n">n=5,203</span></th>
-                <th data-tip="Visibility: objects visible now, as in “the monitor I can still see”.">vis<span class="n">n=2,031</span></th>
+                <th class="split" data-tip="Temporal: when objects were seen, as in “the first chair that appeared” or “the mug I saw most recently”.">temp<span class="n">n=5,203</span></th>
+                <th data-tip="Visibility: objects visible now, as in “the monitor currently visible”.">vis<span class="n">n=2,031</span></th>
                 <th data-tip="Identity: the only object of its kind seen so far, as in “the desk”.">id<span class="n">n=1,544</span></th>
                 <th data-tip="Egocentric distance: distance from the observer, as in “the cabinet closest to me”.">egoD<span class="n">n=2,853</span></th>
                 <th data-tip="Egocentric depth: depth order seen from the observer, as in “the bin between me and the last door to appear”.">egoZ<span class="n">n=1,889</span></th>
-                <th data-tip="Lateral: left or right as the observer saw it, as in “the table to the left of the chair I saw first”, judged from a view where both were seen.">lat<span class="n">n=1,364</span></th>
+                <th data-tip="Lateral: left or right as the observer saw it, as in “the table to the left of the first chair that appeared”, judged from a view where both were seen.">lat<span class="n">n=1,364</span></th>
                 <th data-tip="Proximity: closeness between objects, as in “the chair next to the table I saw most recently”.">prox<span class="n">n=752</span></th>
-                <th data-tip="Relational superlative: the nearest or farthest from another object, as in “the cabinet farthest from the chair I saw first”.">sup<span class="n">n=1,868</span></th>
-                <th data-tip="Set: combined references, as in “the visible chairs other than the nearest one”.">set<span class="n">n=2,347</span></th>
+                <th data-tip="Relational superlative: the nearest or farthest from another object, as in “the cabinet farthest from the first chair that appeared”.">sup<span class="n">n=1,868</span></th>
+                <th data-tip="Set: combined references, as in “the visible chairs that are not the closest to me”.">set<span class="n">n=2,347</span></th>
               </tr>
             </thead>
             <tbody>
@@ -493,16 +493,16 @@
               <tr><td>Qwen3D-3B</td><td>GT / sensor</td><td class="split">95.9</td><td>10.0</td><td>9.6</td><td>12.0</td><td class="split">9.0</td><td>11.1</td><td>12.0</td><td>10.2</td><td>11.5</td><td>9.2</td><td>13.0</td><td>8.1</td><td>10.3</td></tr>
               <tr class="group"><td colspan="15">Scene-graph memory</td></tr>
               <tr><td>DAAAM</td><td>GT / sensor</td><td class="split">77.7</td><td>10.4</td><td>7.9</td><td>11.6</td><td class="split">9.6</td><td>11.4</td><td>13.0</td><td>10.8</td><td>11.9</td><td>6.9</td><td>11.9</td><td>9.0</td><td>11.3</td></tr>
-              <tr><td>DirectMe</td><td>est. / est.</td><td class="split">31.4</td><td>1.7</td><td>0.5</td><td>0.7</td><td class="split">1.7</td><td>2.3</td><td>1.3</td><td>1.3</td><td>1.4</td><td>1.6</td><td>2.7</td><td>2.2</td><td>1.5</td></tr>
+              <tr><td>DirectMe</td><td>est. / est.</td><td class="split">31.4</td><td>1.7</td><td>0.5</td><td>0.7</td><td class="split">1.7</td><td>2.3</td><td>1.3</td><td>1.3</td><td>1.3</td><td>1.6</td><td>2.7</td><td>2.2</td><td>1.5</td></tr>
               <tr><td>DirectMe-GT-P</td><td>GT / est.</td><td class="split">62.6</td><td>11.5</td><td>6.7</td><td>8.4</td><td class="split">10.0</td><td>14.6</td><td>14.4</td><td>11.3</td><td>11.4</td><td>8.6</td><td>9.7</td><td>9.4</td><td>13.0</td></tr>
               <tr><td>DirectMe-GT-PD</td><td>GT / sensor</td><td class="split">73.0</td><td>12.7</td><td>8.7</td><td>10.9</td><td class="split">11.1</td><td>15.2</td><td>15.3</td><td>13.5</td><td>11.7</td><td>10.2</td><td>14.0</td><td>8.0</td><td>14.9</td></tr>
               <tr class="group"><td colspan="15">Object-centric memory</td></tr>
-              <tr><td>MTU3D zero-shot</td><td>GT / sensor</td><td class="split">68.3</td><td>2.8</td><td>1.8</td><td>10.2</td><td class="split">2.1</td><td>2.9</td><td>4.6</td><td>2.1</td><td>2.1</td><td>1.6</td><td>2.2</td><td>2.1</td><td>2.2</td></tr>
-              <tr><td>MTU3D fine-tuned</td><td>GT / sensor</td><td class="split">68.3</td><td>15.9</td><td>10.1</td><td>17.9</td><td class="split">14.4</td><td>19.2</td><td>22.6</td><td>15.7</td><td>16.9</td><td>12.2</td><td>15.6</td><td>10.6</td><td>20.6</td></tr>
-              <tr class="indent"><td>+ history encoder</td><td>GT / sensor</td><td class="split">68.3</td><td>17.8</td><td>11.3</td><td>18.1</td><td class="split">16.3</td><td>21.4</td><td>24.5</td><td>17.7</td><td>19.8</td><td>13.0</td><td>15.8</td><td>11.8</td><td>22.4</td></tr>
+              <tr><td>MTU3D zero-shot</td><td>GT / sensor</td><td class="split">68.3</td><td>2.8</td><td>1.8</td><td>10.2</td><td class="split">2.1</td><td>2.9</td><td>4.6</td><td>2.1</td><td>2.1</td><td>1.5</td><td>2.2</td><td>2.1</td><td>2.2</td></tr>
+              <tr><td>MTU3D fine-tuned</td><td>GT / sensor</td><td class="split">68.3</td><td>15.9</td><td>10.1</td><td>17.9</td><td class="split">14.5</td><td>19.2</td><td>22.6</td><td>15.6</td><td>16.9</td><td>12.2</td><td>15.6</td><td>10.6</td><td>20.6</td></tr>
+              <tr class="indent"><td>+ history encoder</td><td>GT / sensor</td><td class="split">68.3</td><td>17.8</td><td>11.3</td><td>18.1</td><td class="split">16.3</td><td>21.4</td><td>24.5</td><td>17.7</td><td>19.7</td><td>13.0</td><td>15.8</td><td>11.8</td><td>22.4</td></tr>
               <tr class="indent"><td>+ recency encoder</td><td>GT / sensor</td><td class="split">68.3</td><td>18.0</td><td>11.5</td><td>18.9</td><td class="split">16.2</td><td>24.2</td><td>23.3</td><td>16.4</td><td>20.5</td><td>12.9</td><td>16.8</td><td>11.5</td><td>21.8</td></tr>
               <tr class="indent"><td>+ viewpoint encoder</td><td>GT / sensor</td><td class="split">68.3</td><td>19.7</td><td>12.6</td><td>20.9</td><td class="split">17.3</td><td>24.4</td><td>25.3</td><td>20.6</td><td>24.8</td><td>12.3</td><td>20.2</td><td>11.7</td><td>23.4</td></tr>
-              <tr class="best"><td>EgoR-MTU3D</td><td>GT / sensor</td><td class="split">68.3</td><td><b>22.2</b></td><td><b>14.1</b></td><td><b>22.5</b></td><td class="split"><b>19.9</b></td><td><b>27.9</b></td><td><b>27.0</b></td><td><b>23.0</b></td><td><b>27.4</b></td><td><b>15.1</b></td><td><b>20.7</b></td><td><b>13.8</b></td><td><b>26.5</b></td></tr>
+              <tr class="best"><td>EgoR-MTU3D</td><td>GT / sensor</td><td class="split">68.3</td><td><b>22.2</b></td><td><b>14.1</b></td><td><b>22.5</b></td><td class="split"><b>20.0</b></td><td><b>27.9</b></td><td><b>27.0</b></td><td><b>23.0</b></td><td><b>27.4</b></td><td><b>15.1</b></td><td><b>20.7</b></td><td><b>13.8</b></td><td><b>26.5</b></td></tr>
             </tbody>
           </table>
         </div>
@@ -523,7 +523,7 @@
           Green boxes mark ground-truth or correct predictions, red boxes mark incorrect predictions, and blue annotations show ground-truth trajectories or relational anchors; all three example targets are out of view at query time τ.
           <strong>Top</strong>: memory-based methods—EgoR-MTU3D, DAAAM, and DirectMe-GT-P—correctly recover the target for a compositional query over a 414-second observation history, while methods without persistent object memory fail.
           <strong>Bottom left</strong>: viewpoint encoding enables MTU3D to ground the remembered target table, whereas Qwen and fine-tuned MTU3D without the viewpoint encoder select distractors (other visible tables).
-          <strong>Bottom right</strong>: DirectMe's estimated trajectory drifts from GT and misgrounds the pillow, while DirectMe-GT-P yields the correct target.
+          <strong>Bottom right</strong>: DirectMe's estimated trajectory drifts from GT, so it misgrounds the pillow, while DirectMe-GT-P yields the correct target.
         </figcaption>
       </figure>
     </div>
