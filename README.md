@@ -4,7 +4,7 @@
 Simon Fraser University
 
 [![Project Page](https://img.shields.io/badge/Project%20Page-1d5fb8?style=for-the-badge&logo=data:image%2Fsvg%2Bxml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjggNSA0NiA1NCI%2BPHBhdGggZmlsbD0iI2ZmZiIgZD0iTTkgNmg0M3YxMEgxOXYzMmgzM3YxMEg5eiIvPjxwYXRoIGZpbGw9IiM5Y2MyZWYiIGQ9Ik0xOSAzMlEzNiAxMSA1MyAzMlEzNiA1MyAxOSAzMloiLz48Y2lyY2xlIGN4PSIzNiIgY3k9IjMyIiByPSI1LjUiIGZpbGw9IiMyYjRjN2UiLz48L3N2Zz4=)](https://3dlg-hcvc.github.io/EgoRecall/)
-[![Paper](https://img.shields.io/badge/Paper-b31b1b?style=for-the-badge&logo=arxiv&logoColor=white)]()
+[![Paper](https://img.shields.io/badge/Paper-b31b1b?style=for-the-badge&logo=arxiv&logoColor=white)](https://www.alphaxiv.org/abs/2609.egorecall)
 [![Dataset](https://img.shields.io/badge/Dataset-FFD21E?style=for-the-badge&logo=huggingface&logoColor=000)](https://huggingface.co/datasets/3dlg-hcvc/EgoRecall)
 
 
@@ -150,11 +150,10 @@ The paper reports results on test stages 1–5, which contain 10,000 queries. Va
 If you find EgoRecall helpful in your research, please cite our work:
 ```
 @article{tam2026egorecall,
-    title = {{EgoRecall}: {3D} Visual Grounding from Streaming Egocentric Observations},
-    author = {Tam, Hou In Ivan and Savva, Manolis},
-    year = {2026},
-    eprint = {XXXX.XXXXX},
-    archivePrefix = {arXiv}
+  title={{EgoRecall}: {3D} Visual Grounding from Streaming Egocentric Observations},
+  author={Tam, Hou In Ivan and Savva, Manolis},
+  journal={alphaXiv preprint},
+  year={2026}
 }
 ```
 EgoRecall is built on [ScanNet++](https://scannetpp.mlsg.cit.tum.de/scannetpp/), so please cite it as well.
